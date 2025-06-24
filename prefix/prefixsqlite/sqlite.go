@@ -1,4 +1,4 @@
-package mptsqlite
+package prefixsqlite
 
 import (
 	"context"
@@ -6,7 +6,7 @@ import (
 	"errors"
 	"slices"
 
-	"filippo.io/torchwood/mpt"
+	"filippo.io/torchwood/prefix"
 	"zombiezen.com/go/sqlite"
 	"zombiezen.com/go/sqlite/sqlitex"
 )
@@ -33,11 +33,11 @@ func NewSQLiteStorage(ctx context.Context, dbPath string) (*Storage, error) {
 					labelBytes, labelBitLen := args[0].Blob(), uint32(args[1].Int64())
 					prefixBytes, prefixBitLen := args[2].Blob(), uint32(args[3].Int64())
 
-					label, err := mpt.NewLabel(labelBitLen, labelBytes)
+					label, err := prefix.NewLabel(labelBitLen, labelBytes)
 					if err != nil {
 						return sqlite.Value{}, err
 					}
-					prefix, err := mpt.NewLabel(prefixBitLen, prefixBytes)
+					prefix, err := prefix.NewLabel(prefixBitLen, prefixBytes)
 					if err != nil {
 						return sqlite.Value{}, err
 					}
@@ -76,16 +76,16 @@ func (s *Storage) Close() error {
 	return s.pool.Close()
 }
 
-var _ mpt.Storage = (*Storage)(nil)
+var _ prefix.Storage = (*Storage)(nil)
 
-func (s *Storage) Load(ctx context.Context, label mpt.Label) (*mpt.Node, error) {
+func (s *Storage) Load(ctx context.Context, label prefix.Label) (*prefix.Node, error) {
 	conn, err := s.pool.Take(ctx)
 	if err != nil {
 		return nil, err
 	}
 	defer s.pool.Put(conn)
 
-	var node *mpt.Node
+	var node *prefix.Node
 	if err := sqlitex.ExecuteFS(conn, sql, "load.sql", &sqlitex.ExecOptions{
 		Args: []any{
 			label.Bytes(),
@@ -101,23 +101,23 @@ func (s *Storage) Load(ctx context.Context, label mpt.Label) (*mpt.Node, error) 
 	}
 
 	if node == nil {
-		return nil, mpt.ErrNodeNotFound
+		return nil, prefix.ErrNodeNotFound
 	}
 	return node, nil
 }
 
-func (s *Storage) LoadPath(ctx context.Context, label mpt.Label) ([]*mpt.Node, error) {
+func (s *Storage) LoadPath(ctx context.Context, label prefix.Label) ([]*prefix.Node, error) {
 	conn, err := s.pool.Take(ctx)
 	if err != nil {
 		return nil, err
 	}
 	defer s.pool.Put(conn)
 
-	var nodes []*mpt.Node
+	var nodes []*prefix.Node
 	if err := sqlitex.ExecuteFS(conn, sql, "path.sql", &sqlitex.ExecOptions{
 		Named: map[string]any{
-			":root_label":         mpt.RootLabel.Bytes(),
-			":root_label_bit_len": mpt.RootLabel.BitLen(),
+			":root_label":         prefix.RootLabel.Bytes(),
+			":root_label_bit_len": prefix.RootLabel.BitLen(),
 			":label":              label.Bytes(),
 			":label_bit_len":      label.BitLen(),
 		},
@@ -137,11 +137,11 @@ func (s *Storage) LoadPath(ctx context.Context, label mpt.Label) ([]*mpt.Node, e
 	return nodes, nil
 }
 
-func nodeFromRow(stmt *sqlite.Stmt) (*mpt.Node, error) {
+func nodeFromRow(stmt *sqlite.Stmt) (*prefix.Node, error) {
 	labelBytes := make([]byte, 32)
 	stmt.ColumnBytes(0, labelBytes)
 	labelBitLen := stmt.ColumnInt64(1)
-	label, err := mpt.NewLabel(uint32(labelBitLen), labelBytes)
+	label, err := prefix.NewLabel(uint32(labelBitLen), labelBytes)
 	if err != nil {
 		return nil, err
 	}
@@ -149,7 +149,7 @@ func nodeFromRow(stmt *sqlite.Stmt) (*mpt.Node, error) {
 	leftBytes := make([]byte, 32)
 	stmt.ColumnBytes(2, leftBytes)
 	leftBitLen := stmt.ColumnInt64(3)
-	left, err := mpt.NewLabel(uint32(leftBitLen), leftBytes)
+	left, err := prefix.NewLabel(uint32(leftBitLen), leftBytes)
 	if err != nil {
 		return nil, err
 	}
@@ -157,7 +157,7 @@ func nodeFromRow(stmt *sqlite.Stmt) (*mpt.Node, error) {
 	rightBytes := make([]byte, 32)
 	stmt.ColumnBytes(4, rightBytes)
 	rightBitLen := stmt.ColumnInt64(5)
-	right, err := mpt.NewLabel(uint32(rightBitLen), rightBytes)
+	right, err := prefix.NewLabel(uint32(rightBitLen), rightBytes)
 	if err != nil {
 		return nil, err
 	}
@@ -165,7 +165,7 @@ func nodeFromRow(stmt *sqlite.Stmt) (*mpt.Node, error) {
 	hashBytes := make([]byte, 32)
 	stmt.ColumnBytes(6, hashBytes)
 
-	return &mpt.Node{
+	return &prefix.Node{
 		Label: label,
 		Left:  left,
 		Right: right,
@@ -173,7 +173,7 @@ func nodeFromRow(stmt *sqlite.Stmt) (*mpt.Node, error) {
 	}, nil
 }
 
-func (s *Storage) Store(ctx context.Context, nodes ...*mpt.Node) error {
+func (s *Storage) Store(ctx context.Context, nodes ...*prefix.Node) error {
 	conn, err := s.pool.Take(ctx)
 	if err != nil {
 		return err

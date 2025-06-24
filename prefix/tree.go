@@ -1,13 +1,17 @@
-// Package mpt implements the Merkle Patricia Trie, an append-only compressed
-// key-value accumulator based on a sparse binary Merkle tree. Keys and values
-// are arbitrary 32-byte strings.
+// Package prefix implements a compressed binary Merkle trie, or prefix tree: an
+// append-only compressed key-value accumulator based on a sparse binary Merkle
+// tree. Keys and values are arbitrary 32-byte strings.
+//
+// This data structure is sometimes improperly called a "Merkle Patricia Trie",
+// despite not implementing the PATRICIA optimization, which elides the actual
+// key bits from the intermediate nodes.
 //
 // It is compatible with the whatsapp_v1 configuration of the akd library, with
 // NodeHashingMode::NoLeafEpoch.
 //
 // This package is NOT STABLE, regardless of the module version, and the API may
 // change without notice.
-package mpt
+package prefix
 
 import (
 	"context"

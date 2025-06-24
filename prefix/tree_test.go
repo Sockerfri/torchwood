@@ -1,6 +1,6 @@
 //go:build go1.24
 
-package mpt_test
+package prefix_test
 
 import (
 	"encoding/binary"
@@ -10,8 +10,8 @@ import (
 
 	"lukechampine.com/blake3"
 
-	. "filippo.io/torchwood/mpt"
-	"filippo.io/torchwood/mpt/mptsqlite"
+	. "filippo.io/torchwood/prefix"
+	"filippo.io/torchwood/prefix/prefixsqlite"
 )
 
 func testAllStorage(t *testing.T, f func(t *testing.T, newStorage func(t *testing.T) Storage)) {
@@ -23,7 +23,7 @@ func testAllStorage(t *testing.T, f func(t *testing.T, newStorage func(t *testin
 
 	t.Run("sqlite", func(t *testing.T) {
 		f(t, func(t *testing.T) Storage {
-			store, err := mptsqlite.NewSQLiteStorage(t.Context(), "file::memory:?cache=shared")
+			store, err := prefixsqlite.NewSQLiteStorage(t.Context(), "file::memory:?cache=shared")
 			if err != nil {
 				t.Fatal(err)
 			}
