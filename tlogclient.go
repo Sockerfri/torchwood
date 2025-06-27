@@ -38,8 +38,10 @@ func NewClient(tr TileReaderWithContext, opts ...ClientOption) (*Client, error) 
 		opt(c)
 	}
 	if c.cut == nil {
-		// TODO: default to the tlog-tile entries format.
-		return nil, fmt.Errorf("cut function not set")
+		c.cut = func(tile []byte) (entry []byte, rh tlog.Hash, rest []byte, err error) {
+			entry, rest, err = ReadTileEntry(tile)
+			return entry, tlog.RecordHash(entry), rest, err
+		}
 	}
 	if c.timeout == 0 {
 		c.timeout = 5 * time.Minute
@@ -58,7 +60,8 @@ func WithTimeout(d time.Duration) ClientOption {
 	}
 }
 
-// WithCutEntry configures the function to split the next entry from a tile.
+// WithCutEntry configures the function to split the next entry from a tile. The
+// default is to use the c2sp.org/tlog-tiles format.
 //
 // The entry is surfaced by the Entries method, the record hash is used to check
 // inclusion in the tree, and the rest is passed to the next invocation of cut.

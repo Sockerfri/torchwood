@@ -2,6 +2,7 @@ package torchwood
 
 import (
 	"context"
+	"encoding/binary"
 	"fmt"
 	"strings"
 
@@ -48,6 +49,31 @@ func ParseTilePath(path string) (tlog.Tile, error) {
 		return t, nil
 	}
 	return tlog.Tile{}, fmt.Errorf("malformed tile path %q", path)
+}
+
+// ReadTileEntry reads the next entry from the entry bundle according to
+// c2sp.org/tlog-tiles, and returns the remaining data in the tile.
+func ReadTileEntry(tile []byte) (entry, rest []byte, err error) {
+	if len(tile) < 2 {
+		return nil, nil, fmt.Errorf("tile too short")
+	}
+	l := binary.BigEndian.Uint16(tile)
+	tile = tile[2:]
+	if len(tile) < int(l) {
+		return nil, nil, fmt.Errorf("tile too short for entry length %d", l)
+	}
+	return tile[:l], tile[l:], nil
+}
+
+// AppendTileEntry appends the given entry to the entry bundle, according to
+// c2sp.org/tlog-tiles.
+func AppendTileEntry(tile []byte, entry []byte) ([]byte, error) {
+	if len(entry) > 0xFFFF {
+		return nil, fmt.Errorf("entry too long: %d bytes", len(entry))
+	}
+	tile = binary.BigEndian.AppendUint16(tile, uint16(len(entry)))
+	tile = append(tile, entry...)
+	return tile, nil
 }
 
 // TileReaderWithContext is an interface equivalent to [tlog.TileReader], but
