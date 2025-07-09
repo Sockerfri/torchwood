@@ -1,7 +1,6 @@
 // Copyright 2023 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
-// license that can be found at
-// https://go.googlesource.com/go/+/refs/heads/master/LICENSE.
+// license that can be found in the LICENSE file.
 
 // Package torchwood implements a tlog client and various c2sp.org/signed-note,
 // c2sp.org/tlog-cosignature, c2sp.org/tlog-checkpoint, and c2sp.org/tlog-tiles
