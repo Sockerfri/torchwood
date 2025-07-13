@@ -33,7 +33,6 @@ type Client struct {
 // [TileReaderWithContext]. The TileReaderWithContext would typically be a [TileFetcher],
 // optionally wrapped in a [PermanentCache] to cache tiles on disk.
 func NewClient(tr TileReaderWithContext, opts ...ClientOption) (*Client, error) {
-	tr = &edgeMemoryCache{tr: tr, t: make(map[int][2]tileWithData)}
 	c := &Client{tr: tr}
 	for _, opt := range opts {
 		opt(c)
@@ -108,6 +107,7 @@ func (c *Client) Err() error {
 func (c *Client) Entries(ctx context.Context, tree tlog.Tree, start int64) iter.Seq2[int64, []byte] {
 	c.err = nil
 	mainCtx := ctx
+	tr := &edgeMemoryCache{tr: c.tr, t: make(map[int][2]tileWithData)}
 	return func(yield func(int64, []byte) bool) {
 		ctx, cancel := context.WithTimeout(mainCtx, c.timeout)
 		defer func() { cancel() }()
@@ -144,7 +144,7 @@ func (c *Client) Entries(ctx context.Context, tree tlog.Tree, start int64) iter.
 			if len(tiles) == 0 {
 				return
 			}
-			tdata, err := c.tr.ReadTiles(ctx, tiles)
+			tdata, err := tr.ReadTiles(ctx, tiles)
 			if err != nil {
 				c.err = err
 				return
@@ -157,7 +157,7 @@ func (c *Client) Entries(ctx context.Context, tree tlog.Tree, start int64) iter.
 					indexes = append(indexes, tlog.StoredHashIndex(0, t.N*TileWidth+int64(i)))
 				}
 			}
-			hashes, err := TileHashReaderWithContext(ctx, tree, c.tr).ReadHashes(indexes)
+			hashes, err := TileHashReaderWithContext(ctx, tree, tr).ReadHashes(indexes)
 			if err != nil {
 				c.err = err
 				return
@@ -207,7 +207,7 @@ func (c *Client) Entries(ctx context.Context, tree tlog.Tree, start int64) iter.
 				start = tileEnd
 			}
 
-			c.tr.SaveTiles(tiles, tdata)
+			tr.SaveTiles(tiles, tdata)
 
 			if start == top {
 				return
@@ -226,7 +226,7 @@ type tileWithData struct {
 // through the tree as we progress through entries.
 type edgeMemoryCache struct {
 	tr TileReaderWithContext
-	t  map[int][2]tileWithData
+	t  map[int][2]tileWithData // map[level][2]tileWithData
 }
 
 func (c *edgeMemoryCache) ReadTiles(ctx context.Context, tiles []tlog.Tile) (data [][]byte, err error) {
@@ -270,6 +270,8 @@ func (c *edgeMemoryCache) SaveTiles(tiles []tlog.Tile, data [][]byte) {
 	}
 	c.tr.SaveTiles(ts, ds)
 
+	// Concretely, we just save the two rightmost observed tiles at each level,
+	// which in practice during a scan will be the two edges.
 	for i, t := range tiles {
 		td, ok := c.t[t.L]
 		switch {
