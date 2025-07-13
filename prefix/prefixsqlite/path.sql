@@ -98,7 +98,11 @@ WHERE
     -- return the siblings of the path to the target
     onpath = 0
     OR -- and the final node which will become the sibling of the target
-    -- unless it's the empty child of the root that will be replaced
+    -- unless it's the target or the empty child of the root that will be replaced
     onpath = 1
     AND side = -1
     AND label_bit_len != 0
+    AND (
+        label != :label
+        OR label_bit_len != :label_bit_len
+    )
