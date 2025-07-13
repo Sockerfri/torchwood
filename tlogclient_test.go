@@ -1,7 +1,8 @@
+//go:build go1.24
+
 package torchwood_test
 
 import (
-	"context"
 	"fmt"
 	"log/slog"
 	"path/filepath"
@@ -22,6 +23,31 @@ InZSsRXdXKTMF3W5wEcd9T6ro5zyOiRMGQsEPSTco6U=
 	}
 
 	handler, _ := testLogHandler(t)
+
+	for _, idx := range []int64{0, 1, 255, 256, 257,
+		31048497 - 31048497%256 - 1, 31048497 - 31048497%256,
+		31048497 - 31048497%256 + 1, 31048497 - 1} {
+		t.Run(fmt.Sprintf("Entry%d", idx), func(t *testing.T) {
+			fetcher, err := torchwood.NewTileFetcher("https://sum.golang.org/",
+				torchwood.WithTilePath(tlog.Tile.Path),
+				torchwood.WithTileFetcherLogger(slog.New(handler)))
+			if err != nil {
+				t.Fatal(err)
+			}
+			client, err := torchwood.NewClient(fetcher, torchwood.WithSumDBEntries())
+			if err != nil {
+				t.Fatal(err)
+			}
+			entry, proof, err := client.Entry(t.Context(), tree, idx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			rh := tlog.RecordHash(entry)
+			if err := tlog.CheckRecord(proof, tree.N, tree.Hash, idx, rh); err != nil {
+				t.Fatalf("CheckRecord failed: %v", err)
+			}
+		})
+	}
 
 	tests := []struct {
 		start  int64
@@ -49,7 +75,7 @@ InZSsRXdXKTMF3W5wEcd9T6ro5zyOiRMGQsEPSTco6U=
 				}
 
 				count := 0
-				for range client.Entries(context.Background(), tree, tt.start) {
+				for range client.Entries(t.Context(), tree, tt.start) {
 					count++
 					if count >= 1000 {
 						break
@@ -82,7 +108,7 @@ InZSsRXdXKTMF3W5wEcd9T6ro5zyOiRMGQsEPSTco6U=
 				}
 
 				count := 0
-				for range client.Entries(context.Background(), tree, tt.start) {
+				for range client.Entries(t.Context(), tree, tt.start) {
 					count++
 					if count >= 1000 {
 						break
@@ -101,7 +127,7 @@ InZSsRXdXKTMF3W5wEcd9T6ro5zyOiRMGQsEPSTco6U=
 					t.Fatal(err)
 				}
 				count = 0
-				for range client.Entries(context.Background(), tree, tt.start) {
+				for range client.Entries(t.Context(), tree, tt.start) {
 					count++
 					if count >= 1000 {
 						break

@@ -21,7 +21,7 @@ import (
 )
 
 // Client is a tlog client that fetches and authenticates tiles, and exposes log
-// entries as a Go iterator.
+// entries as a Go iterator or by their index.
 type Client struct {
 	tr      TileReaderWithContext
 	cut     func([]byte) ([]byte, tlog.Hash, []byte, error)
@@ -299,6 +299,46 @@ func tileLess(a, b tlog.Tile) bool {
 		panic("different levels")
 	}
 	return a.N < b.N || (a.N == b.N && a.W < b.W)
+}
+
+// Entry returns a log entry by its index, and an inclusion proof in the tree.
+//
+// The provided tree should have been verified by the caller, for example by
+// verifying the signatures on a [Checkpoint].
+func (c *Client) Entry(ctx context.Context, tree tlog.Tree, index int64) ([]byte, tlog.RecordProof, error) {
+	if index < 0 || index >= tree.N {
+		return nil, nil, fmt.Errorf("tlog: invalid index %d for tree of size %d", index, tree.N)
+	}
+
+	dataTile := tlog.Tile{H: TileHeight, L: -1, N: index / TileWidth, W: TileWidth}
+	dataTile.W = min(dataTile.W, int(tree.N-dataTile.N*TileWidth))
+	data, err := c.tr.ReadTiles(ctx, []tlog.Tile{dataTile})
+	if err != nil {
+		return nil, nil, fmt.Errorf("tlog: failed to read tile %s: %w", dataTile.Path(), err)
+	}
+
+	tile := data[0]
+	var entry []byte
+	var rh tlog.Hash
+	for range index - dataTile.N*TileWidth + 1 {
+		if len(tile) == 0 {
+			return nil, nil, fmt.Errorf("tlog: no entry at index %d in tile %s", index, dataTile.Path())
+		}
+		entry, rh, tile, err = c.cut(tile)
+		if err != nil {
+			return nil, nil, fmt.Errorf("tlog: failed to cut entry %d from tile %s: %w", index, dataTile.Path(), err)
+		}
+	}
+
+	proof, err := tlog.ProveRecord(tree.N, index, TileHashReaderWithContext(ctx, tree, c.tr))
+	if err != nil {
+		return nil, nil, fmt.Errorf("tlog: failed to prove entry %d in tree of size %d: %w", index, tree.N, err)
+	}
+	if err := tlog.CheckRecord(proof, tree.N, tree.Hash, index, rh); err != nil {
+		return nil, nil, fmt.Errorf("tlog: data entry %d does not match Merkle tree: %w", index, err)
+	}
+
+	return entry, proof, nil
 }
 
 // TileFetcher is a [TileReaderWithContext] that fetches tiles from a remote server.
