@@ -431,8 +431,9 @@ func WithTilePath(tilePath func(tlog.Tile) string) TileFetcherOption {
 	}
 }
 
-// ReadTiles implements [TileReaderWithContext]. It retries 429 and 5xx
-// responses, and network errors.
+// ReadTiles implements [TileReaderWithContext].
+//
+// It retries 429 and 5xx responses, and network errors.
 func (f *TileFetcher) ReadTiles(ctx context.Context, tiles []tlog.Tile) (data [][]byte, err error) {
 	data = make([][]byte, len(tiles))
 	errGroup, ctx := errgroup.WithContext(ctx)
@@ -440,60 +441,69 @@ func (f *TileFetcher) ReadTiles(ctx context.Context, tiles []tlog.Tile) (data []
 		errGroup.SetLimit(f.limit)
 	}
 	for i, t := range tiles {
-		if t.H != TileHeight {
-			return nil, fmt.Errorf("unexpected tile height %d", t.H)
-		}
 		errGroup.Go(func() error {
+			if t.H != TileHeight {
+				return fmt.Errorf("unexpected tile height %d", t.H)
+			}
 			path := f.tilePath(t)
-			req, err := http.NewRequestWithContext(ctx, "GET", f.base+path, nil)
-			if err != nil {
-				return fmt.Errorf("%s: failed to create request: %w", path, err)
-			}
-			var errs error
-			var retryAfter time.Time
-			for j := range 5 {
-				if j > 0 {
-					// Wait 1s, 5s, 25s, or 125s before retrying.
-					pause := time.Duration(math.Pow(5, float64(j-1))) * time.Second
-					if !retryAfter.IsZero() {
-						pause = time.Until(retryAfter)
-						retryAfter = time.Time{}
-					}
-					f.log.InfoContext(ctx, "retrying tile fetch", "path", path,
-						"pause", pause, "errs", errs, "retry", j)
-					select {
-					case <-ctx.Done():
-						return ctx.Err()
-					case <-time.After(pause):
-					}
-				}
-				req.Header.Set("User-Agent", f.ua)
-				resp, err := f.hc.Do(req)
-				if err != nil {
-					errs = errors.Join(errs, err)
-					continue
-				}
-				defer resp.Body.Close()
-				switch {
-				case resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode >= 500:
-					retryAfter = parseRetryAfter(resp.Header.Get("Retry-After"))
-					errs = errors.Join(errs, fmt.Errorf("unexpected status code %d", resp.StatusCode))
-					continue
-				case resp.StatusCode != http.StatusOK:
-					return fmt.Errorf("%s: unexpected status code %d", path, resp.StatusCode)
-				}
-				data[i], err = io.ReadAll(resp.Body)
-				if err != nil {
-					errs = errors.Join(errs, err)
-					continue
-				}
-				f.log.InfoContext(ctx, "fetched tile", "path", path, "size", len(data[i]))
-				return nil
-			}
-			return fmt.Errorf("%s: %w", path, errs)
+			d, err := f.ReadEndpoint(ctx, path)
+			data[i] = d
+			return err
 		})
 	}
 	return data, errGroup.Wait()
+}
+
+// ReadEndpoint fetches an arbitrary path.
+//
+// It retries 429 and 5xx responses, and network errors.
+func (f *TileFetcher) ReadEndpoint(ctx context.Context, path string) (data []byte, err error) {
+	req, err := http.NewRequestWithContext(ctx, "GET", f.base+path, nil)
+	if err != nil {
+		return nil, fmt.Errorf("%s: failed to create request: %w", path, err)
+	}
+	var errs error
+	var retryAfter time.Time
+	for j := range 5 {
+		if j > 0 {
+			// Wait 1s, 5s, 25s, or 125s before retrying.
+			pause := time.Duration(math.Pow(5, float64(j-1))) * time.Second
+			if !retryAfter.IsZero() {
+				pause = time.Until(retryAfter)
+				retryAfter = time.Time{}
+			}
+			f.log.InfoContext(ctx, "retrying GET request", "path", path,
+				"pause", pause, "errs", errs, "retry", j)
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case <-time.After(pause):
+			}
+		}
+		req.Header.Set("User-Agent", f.ua)
+		resp, err := f.hc.Do(req)
+		if err != nil {
+			errs = errors.Join(errs, err)
+			continue
+		}
+		defer resp.Body.Close()
+		switch {
+		case resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode >= 500:
+			retryAfter = parseRetryAfter(resp.Header.Get("Retry-After"))
+			errs = errors.Join(errs, fmt.Errorf("unexpected status code %d", resp.StatusCode))
+			continue
+		case resp.StatusCode != http.StatusOK:
+			return nil, fmt.Errorf("%s: unexpected status code %d", path, resp.StatusCode)
+		}
+		data, err := io.ReadAll(resp.Body)
+		if err != nil {
+			errs = errors.Join(errs, err)
+			continue
+		}
+		f.log.InfoContext(ctx, "fetched resource", "path", path, "size", len(data))
+		return data, nil
+	}
+	return nil, fmt.Errorf("%s: %w", path, errs)
 }
 
 // parseRetryAfter parses the Retry-After header value. It returns the time

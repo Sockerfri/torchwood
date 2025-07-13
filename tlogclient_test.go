@@ -3,6 +3,7 @@
 package torchwood_test
 
 import (
+	"bytes"
 	"fmt"
 	"log/slog"
 	"path/filepath"
@@ -11,6 +12,22 @@ import (
 	"filippo.io/torchwood"
 	"golang.org/x/mod/sumdb/tlog"
 )
+
+func TestReadEndpoint(t *testing.T) {
+	handler, _ := testLogHandler(t)
+	fetcher, err := torchwood.NewTileFetcher("https://sum.golang.org/",
+		torchwood.WithTileFetcherLogger(slog.New(handler)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := fetcher.ReadEndpoint(t.Context(), "latest")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.HasPrefix(data, []byte("go.sum database tree\n")) {
+		t.Fatalf("got %q, want prefix %q", data, "go.sum database tree\n")
+	}
+}
 
 func TestSumDB(t *testing.T) {
 	latest := []byte(`go.sum database tree
