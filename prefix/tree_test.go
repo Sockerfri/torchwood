@@ -6,6 +6,7 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"math/rand/v2"
+	"runtime"
 	"testing"
 
 	"lukechampine.com/blake3"
@@ -48,9 +49,8 @@ func testFullTree(t *testing.T, newStorage func(t *testing.T) Storage) {
 		fatalIfErr(t, tree.Insert(t.Context(), label, value))
 	}
 
-	root, err := store.Load(t.Context(), RootLabel)
+	rootHash, err := tree.RootHash(t.Context())
 	fatalIfErr(t, err)
-	rootHash := root.Hash
 
 	store = newStorage(t)
 	fatalIfErr(t, InitStorage(t.Context(), blake3.Sum256, store))
@@ -63,10 +63,10 @@ func testFullTree(t *testing.T, newStorage func(t *testing.T) Storage) {
 		fatalIfErr(t, tree.Insert(t.Context(), label, value))
 	}
 
-	root, err = store.Load(t.Context(), RootLabel)
+	rootHash1, err := tree.RootHash(t.Context())
 	fatalIfErr(t, err)
-	if root.Hash != rootHash {
-		t.Fatalf("after inserting in reverse order: got %x, want %x", root.Hash, rootHash)
+	if rootHash1 != rootHash {
+		t.Fatalf("after inserting in reverse order: got %x, want %x", rootHash1, rootHash)
 	}
 
 	store = newStorage(t)
@@ -80,10 +80,10 @@ func testFullTree(t *testing.T, newStorage func(t *testing.T) Storage) {
 		fatalIfErr(t, tree.Insert(t.Context(), label, value))
 	}
 
-	root, err = store.Load(t.Context(), RootLabel)
+	rootHash1, err = tree.RootHash(t.Context())
 	fatalIfErr(t, err)
-	if root.Hash != rootHash {
-		t.Fatalf("after inserting in random order: got %x, want %x", root.Hash, rootHash)
+	if rootHash1 != rootHash {
+		t.Fatalf("after inserting in random order: got %x, want %x", rootHash1, rootHash)
 	}
 }
 
@@ -91,6 +91,10 @@ func TestAccumulated(t *testing.T) {
 	testAllStorage(t, testAccumulated)
 }
 func testAccumulated(t *testing.T, newStorage func(t *testing.T) Storage) {
+	if _, ok := newStorage(t).(*prefixsqlite.Storage); ok && testing.Short() {
+		t.Skip("skipping accumulated test for sqlite storage in short mode")
+	}
+
 	source := blake3.New(0, nil).XOF()
 	sink := blake3.New(32, nil)
 
@@ -98,17 +102,17 @@ func testAccumulated(t *testing.T, newStorage func(t *testing.T) Storage) {
 		store := newStorage(t)
 		fatalIfErr(t, InitStorage(t.Context(), blake3.Sum256, store))
 		tree := NewTree(blake3.Sum256, store)
-		root, err := store.Load(t.Context(), RootLabel)
+		rootHash, err := tree.RootHash(t.Context())
 		fatalIfErr(t, err)
-		sink.Write(root.Hash[:])
+		sink.Write(rootHash[:])
 		for range 1000 {
 			var label, value [32]byte
 			source.Read(label[:])
 			source.Read(value[:])
 			fatalIfErr(t, tree.Insert(t.Context(), label, value))
-			root, err := store.Load(t.Context(), RootLabel)
+			rootHash, err := tree.RootHash(t.Context())
 			fatalIfErr(t, err)
-			sink.Write(root.Hash[:])
+			sink.Write(rootHash[:])
 		}
 	}
 
@@ -116,6 +120,66 @@ func testAccumulated(t *testing.T, newStorage func(t *testing.T) Storage) {
 	result := sink.Sum(nil)
 	if hex.EncodeToString(result) != exp {
 		t.Fatalf("expected hash %s, got %x", exp, result)
+	}
+}
+
+func TestMemoryUsage(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping memory usage test in short mode")
+	}
+
+	store := NewMemoryStorage()
+	fatalIfErr(t, InitStorage(t.Context(), blake3.Sum256, store))
+	tree := NewTree(blake3.Sum256, store)
+
+	runtime.GC()
+	var start runtime.MemStats
+	runtime.ReadMemStats(&start)
+
+	source := blake3.New(0, nil).XOF()
+	for n := range 1000000 {
+		var label, value [32]byte
+		source.Read(label[:])
+		source.Read(value[:])
+		fatalIfErr(t, tree.Insert(t.Context(), label, value))
+
+		switch n + 1 {
+		case 1000, 10000, 100000, 1000000:
+			runtime.GC()
+			var m runtime.MemStats
+			runtime.ReadMemStats(&m)
+			t.Logf("Memory usage after inserting % 8d nodes: % 10d bytes", n+1, int64(m.Alloc)-int64(start.Alloc))
+		}
+	}
+}
+
+func TestMembershipProof(t *testing.T) {
+	testAllStorage(t, testMembershipProof)
+}
+func testMembershipProof(t *testing.T, newStorage func(t *testing.T) Storage) {
+	store := newStorage(t)
+	fatalIfErr(t, InitStorage(t.Context(), blake3.Sum256, store))
+	tree := NewTree(blake3.Sum256, store)
+
+	var entries [][32]byte
+	for _, n := range rand.Perm(100) {
+		var label [32]byte
+		binary.LittleEndian.PutUint16(label[:], uint16(n))
+		value := blake3.Sum256(label[:])
+		fatalIfErr(t, tree.Insert(t.Context(), label, value))
+		entries = append(entries, label)
+
+		rootHash, err := tree.RootHash(t.Context())
+		fatalIfErr(t, err)
+
+		for _, label := range entries {
+			value := blake3.Sum256(label[:])
+			proof, err := tree.Lookup(t.Context(), label)
+			fatalIfErr(t, err)
+			if err := VerifyMembershipProof(blake3.Sum256, label, value, proof, rootHash); err != nil {
+				t.Fatalf("membership proof for %x with %d entries failed: %v", label, len(entries), err)
+			}
+		}
 	}
 }
 
