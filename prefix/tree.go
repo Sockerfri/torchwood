@@ -141,14 +141,43 @@ type ProofNode struct {
 	Hash  [32]byte
 }
 
-func (t *Tree) Lookup(ctx context.Context, label [32]byte) ([]ProofNode, error) {
+// Lookup returns whether the given label is present in the tree, and a
+// membership or non-membership proof for it.
+//
+// # Membership proofs
+//
+// A membership proof is a sequence of sibling nodes from the leaf's sibling to
+// the root's child.
+//
+// Compared to akd_core's Vec<SiblingProof>, this omits the parent label and
+// direction of each sibling, as they can be derived from the label and the tree
+// structure.
+//
+// # Non-membership proofs
+//
+// A non-membership proof is a sequence of sibling nodes from what would be the
+// leaf's sibling (if it was inserted) to the root's child. If the tree is empty,
+// a non-membership proof is a single empty node.
+//
+// When verifying it, check that the first two entries are not prefixes of the
+// non-included label, but their parent is, proving the label is not present.
+//
+// An alternative way to think about it (matching akd_core's NonMembershipProof
+// is that the first two entries are the longest prefix's children, the longest
+// prefix itself is omitted as it can be derived from its children, and the rest
+// of the entries are the membership proof for the longest prefix.
+func (t *Tree) Lookup(ctx context.Context, label [32]byte) (bool, []ProofNode, error) {
+	found := true
 	l := Label{256, label}
-	if _, err := t.s.Load(ctx, l); err != nil {
-		return nil, fmt.Errorf("failed to load node %s: %w", l, err)
+	// TODO(filippo): we can optimize this by making loadPath return presence.
+	if _, err := t.s.Load(ctx, l); err == ErrNodeNotFound {
+		found = false
+	} else if err != nil {
+		return false, nil, fmt.Errorf("failed to load node %s: %w", l, err)
 	}
 	path, err := loadPath(ctx, t.s, l)
 	if err != nil {
-		return nil, fmt.Errorf("failed to load path for node %s: %w", l, err)
+		return false, nil, fmt.Errorf("failed to load path for node %s: %w", l, err)
 	}
 	proof := make([]ProofNode, 0, len(path))
 	for _, sibling := range path {
@@ -157,7 +186,7 @@ func (t *Tree) Lookup(ctx context.Context, label [32]byte) ([]ProofNode, error) 
 			Hash:  sibling.Hash,
 		})
 	}
-	return proof, nil
+	return found, proof, nil
 }
 
 // loadPath loads the siblings of the path to reach the given node
@@ -228,6 +257,10 @@ func (t *Tree) Insert(ctx context.Context, label, value [32]byte) error {
 
 func VerifyMembershipProof(h HashFunc, label, value [32]byte, proof []ProofNode, root [32]byte) error {
 	node := newLeaf(h, label, value)
+	return verifyInclusion(h, node, proof, root)
+}
+
+func verifyInclusion(h HashFunc, node *Node, proof []ProofNode, root [32]byte) error {
 	for _, sibling := range proof {
 		var err error
 		node, err = newParentNode(h, node, &Node{
@@ -245,4 +278,34 @@ func VerifyMembershipProof(h HashFunc, label, value [32]byte, proof []ProofNode,
 		return fmt.Errorf("proof does not match root hash, got %x, want %x", node.Hash, root)
 	}
 	return nil
+}
+
+func VerifyNonMembershipProof(h HashFunc, label [32]byte, proof []ProofNode, root [32]byte) error {
+	if len(proof) == 1 {
+		empty, r := newEmptyNode(h), newRootNode(h)
+		if proof[0].Label == empty.Label && proof[0].Hash == empty.Hash && r.Hash == root {
+			return nil // Empty tree, non-membership is trivially proven.
+		}
+	}
+	if len(proof) < 2 {
+		return errors.New("non-membership proof must have at least two entries")
+	}
+	l := Label{256, label}
+	if l.HasPrefix(proof[0].Label) || l.HasPrefix(proof[1].Label) {
+		return fmt.Errorf("non-membership is not proven: %s is a prefix of %s or %s", l, proof[0].Label, proof[1].Label)
+	}
+	parent, err := newParentNode(h, &Node{
+		Label: proof[0].Label,
+		Hash:  proof[0].Hash,
+	}, &Node{
+		Label: proof[1].Label,
+		Hash:  proof[1].Hash,
+	})
+	if err != nil {
+		return fmt.Errorf("failed to compute parent node: %w", err)
+	}
+	if !l.HasPrefix(parent.Label) {
+		return fmt.Errorf("non-membership is not proven: %s is not a prefix of %s", l, parent.Label)
+	}
+	return verifyInclusion(h, parent, proof[2:], root)
 }

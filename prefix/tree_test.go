@@ -161,25 +161,52 @@ func testMembershipProof(t *testing.T, newStorage func(t *testing.T) Storage) {
 	fatalIfErr(t, InitStorage(t.Context(), blake3.Sum256, store))
 	tree := NewTree(blake3.Sum256, store)
 
-	var entries [][32]byte
-	for _, n := range rand.Perm(100) {
+	inserted := make(map[[32]byte]bool)
+	check := func(i int) {
+		rootHash, err := tree.RootHash(t.Context())
+		fatalIfErr(t, err)
+
+		for n := range 100 {
+			var label [32]byte
+			binary.LittleEndian.PutUint16(label[:], uint16(n))
+			value := blake3.Sum256(label[:])
+
+			present, proof, err := tree.Lookup(t.Context(), label)
+			fatalIfErr(t, err)
+			if inserted[label] {
+				if !present {
+					t.Fatalf("label %x not found in tree after insertion", label)
+				}
+				if err := VerifyMembershipProof(blake3.Sum256, label, value, proof, rootHash); err != nil {
+					t.Fatalf("membership proof for %x with %d entries failed: %v", label, i, err)
+				}
+				if err := VerifyNonMembershipProof(blake3.Sum256, label, proof, rootHash); err == nil {
+					t.Fatalf("non-membership proof for %x with %d entries should have failed", label, i)
+				}
+			} else {
+				if present {
+					t.Fatalf("label %x found in tree after insertion, but it should not be", label)
+				}
+				if err := VerifyNonMembershipProof(blake3.Sum256, label, proof, rootHash); err != nil {
+					t.Fatalf("non-membership proof for %x with %d entries failed: %v", label, i, err)
+				}
+				if err := VerifyMembershipProof(blake3.Sum256, label, value, proof, rootHash); err == nil {
+					t.Fatalf("membership proof for %x with %d entries should have failed", label, i)
+				}
+			}
+		}
+	}
+
+	// Run the check on the emtpy tree.
+	check(0)
+
+	for i, n := range rand.Perm(100) {
 		var label [32]byte
 		binary.LittleEndian.PutUint16(label[:], uint16(n))
 		value := blake3.Sum256(label[:])
 		fatalIfErr(t, tree.Insert(t.Context(), label, value))
-		entries = append(entries, label)
-
-		rootHash, err := tree.RootHash(t.Context())
-		fatalIfErr(t, err)
-
-		for _, label := range entries {
-			value := blake3.Sum256(label[:])
-			proof, err := tree.Lookup(t.Context(), label)
-			fatalIfErr(t, err)
-			if err := VerifyMembershipProof(blake3.Sum256, label, value, proof, rootHash); err != nil {
-				t.Fatalf("membership proof for %x with %d entries failed: %v", label, len(entries), err)
-			}
-		}
+		inserted[label] = true
+		check(i + 1)
 	}
 }
 
