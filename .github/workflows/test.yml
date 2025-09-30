@@ -1,25 +1,58 @@
 name: Go tests
-on: [push, pull_request]
+on:
+  push:
+  pull_request:
+  schedule: # daily at 09:42 UTC
+    - cron: '42 9 * * *'
+  workflow_dispatch:
 permissions:
   contents: read
 jobs:
   test:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        go:
+          - { go-version: stable }
+          - { go-version: oldstable }
+          - { go-version-file: go.mod }
+        deps:
+          - locked
+          - latest
     steps:
-      - name: Install hurl
+      - name: Install hurl 4.1.0
         run: |
           curl --location --remote-name https://github.com/Orange-OpenSource/hurl/releases/download/4.1.0/hurl_4.1.0_amd64.deb
           sudo apt-get update && sudo apt-get install ./hurl_4.1.0_amd64.deb
-      - name: Checkout repository
-        uses: actions/checkout@v2
+      - uses: actions/checkout@v5
         with:
-          fetch-depth: 0
-      - name: Install Go (from go.mod)
-        uses: actions/setup-go@v4
+          persist-credentials: false
+      - uses: actions/setup-go@v6
         with:
-          go-version-file: go.mod
-          check-latest: true
-      - name: Run tests
-        run: go test ./...
-      - name: Run tests (short + race)
-        run: go test -short -race ./...
+          go-version: ${{ matrix.go.go-version }}
+          go-version-file: ${{ matrix.go.go-version-file }}
+      - run: go get -u && go mod tidy
+        if: matrix.deps == 'latest'
+      - run: go test ./...
+      - run: go test -short -race ./...
+  staticcheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@v6
+        with:
+          go-version: stable
+      - run: go run honnef.co/go/tools/cmd/staticcheck@latest ./...
+  govulncheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@v6
+        with:
+          go-version: stable
+      - run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...

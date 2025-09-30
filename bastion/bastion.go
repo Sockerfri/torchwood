@@ -59,6 +59,8 @@ func (kh keyHash) String() string {
 	return hex.EncodeToString(kh[:])
 }
 
+type backendContextKey struct{}
+
 // New returns a new Bastion.
 //
 // The Config must not be modified after the call to New.
@@ -74,7 +76,7 @@ func New(c *Config) (*Bastion, error) {
 	b.proxy = &httputil.ReverseProxy{
 		Rewrite: func(pr *httputil.ProxyRequest) {
 			pr.Out.URL.Scheme = "https" // needed for the required :scheme header
-			pr.Out.Host = pr.In.Context().Value("backend").(string)
+			pr.Out.Host = pr.In.Context().Value(backendContextKey{}).(string)
 			pr.SetXForwarded()
 			// We don't interpret the query, so pass it on unmodified.
 			pr.Out.URL.RawQuery = pr.In.URL.RawQuery
@@ -158,7 +160,7 @@ func (b *Bastion) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "request must start with /KEY_HASH/", http.StatusNotFound)
 		return
 	}
-	ctx := context.WithValue(r.Context(), "backend", kh)
+	ctx := context.WithValue(r.Context(), backendContextKey{}, kh)
 	r = r.Clone(ctx)
 	r.URL.Path = "/" + path
 	b.proxy.ServeHTTP(w, r)

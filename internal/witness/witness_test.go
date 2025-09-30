@@ -13,7 +13,6 @@ import (
 	"golang.org/x/mod/sumdb/note"
 	"golang.org/x/mod/sumdb/tlog"
 	"sigsum.org/sigsum-go/pkg/merkle"
-	"zombiezen.com/go/sqlite/sqlitex"
 )
 
 func TestRace(t *testing.T) {
@@ -28,11 +27,11 @@ func TestRace(t *testing.T) {
 	origin := "sigsum.org/v1/tree/4d6d8825a6bb689d459628312889dfbb0bcd41b5211d9e1ce768b0ff0309e562"
 
 	treeHash := merkle.HashEmptyTree()
-	fatalIfErr(t, sqlitex.Exec(w.db, "INSERT INTO log (origin, tree_size, tree_hash) VALUES (?, 0, ?)",
+	fatalIfErr(t, sqlitexExec(w.db, "INSERT INTO log (origin, tree_size, tree_hash) VALUES (?, 0, ?)",
 		nil, origin, base64.StdEncoding.EncodeToString(treeHash[:])))
 	k, err := note.NewEd25519VerifierKey(origin, pk[:])
 	fatalIfErr(t, err)
-	fatalIfErr(t, sqlitex.Exec(w.db, "INSERT INTO key (origin, key) VALUES (?, ?)", nil, origin, k))
+	fatalIfErr(t, sqlitexExec(w.db, "INSERT INTO key (origin, key) VALUES (?, ?)", nil, origin, k))
 
 	_, err = w.processAddCheckpointRequest([]byte(`old 0
 

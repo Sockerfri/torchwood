@@ -303,7 +303,7 @@ func (w *Witness) getKeys(origin string) (note.Verifiers, error) {
 func (w *Witness) dbExec(query string, resultFn func(stmt *sqlite.Stmt) error, args ...interface{}) error {
 	w.dmMu.Lock()
 	defer w.dmMu.Unlock()
-	err := sqlitex.Exec(w.db, query, resultFn, args...)
+	err := sqlitexExec(w.db, query, resultFn, args...)
 	if err != nil {
 		w.log.Error("database error", "error", err)
 	}
@@ -313,10 +313,14 @@ func (w *Witness) dbExec(query string, resultFn func(stmt *sqlite.Stmt) error, a
 func (w *Witness) dbExecWithChanges(query string, resultFn func(stmt *sqlite.Stmt) error, args ...interface{}) (int, error) {
 	w.dmMu.Lock()
 	defer w.dmMu.Unlock()
-	err := sqlitex.Exec(w.db, query, resultFn, args...)
+	err := sqlitexExec(w.db, query, resultFn, args...)
 	if err != nil {
 		w.log.Error("database error", "error", err)
 		return 0, err
 	}
 	return w.db.Changes(), nil
+}
+
+func sqlitexExec(conn *sqlite.Conn, query string, resultFn func(stmt *sqlite.Stmt) error, args ...any) error {
+	return sqlitex.Execute(conn, query, &sqlitex.ExecOptions{ResultFunc: resultFn, Args: args})
 }

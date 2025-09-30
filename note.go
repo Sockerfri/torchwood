@@ -50,7 +50,6 @@ type verifier struct {
 	name   string
 	hash   uint32
 	verify func(msg, sig []byte) bool
-	key    ed25519.PublicKey
 }
 
 func (v *verifier) Name() string                { return v.name }

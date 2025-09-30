@@ -233,14 +233,14 @@ func indexHandler(w *witness.Witness) http.HandlerFunc {
 		fmt.Fprintf(rw, "# litewitness %s\n\n", html.EscapeString(*nameFlag))
 		fmt.Fprintf(rw, "%s\n\n", html.EscapeString(w.VerifierKey()))
 		fmt.Fprintf(rw, "## Logs\n\n")
-		sqlitex.Exec(db, "SELECT origin, tree_size, tree_hash FROM log",
-			func(stmt *sqlite.Stmt) error {
+		sqlitex.Execute(db, "SELECT origin, tree_size, tree_hash FROM log", &sqlitex.ExecOptions{
+			ResultFunc: func(stmt *sqlite.Stmt) error {
 				fmt.Fprintf(rw, "- %s\n  (size %d, root %s)\n\n",
 					html.EscapeString(stmt.ColumnText(0)),
 					stmt.ColumnInt64(1), stmt.ColumnText(2))
 				return nil
 			},
-		)
+		})
 	}
 }
 

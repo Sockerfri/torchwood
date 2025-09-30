@@ -80,7 +80,7 @@ func openDB(dbPath string) *sqlite.Conn {
 
 func addLog(db *sqlite.Conn, origin string) {
 	treeHash := merkle.HashEmptyTree()
-	if err := sqlitex.Exec(db, "INSERT INTO log (origin, tree_size, tree_hash) VALUES (?, 0, ?)",
+	if err := sqlitexExec(db, "INSERT INTO log (origin, tree_size, tree_hash) VALUES (?, 0, ?)",
 		nil, origin, base64.StdEncoding.EncodeToString(treeHash[:])); err != nil {
 		log.Fatalf("Error adding log: %v", err)
 	}
@@ -95,7 +95,7 @@ func addKey(db *sqlite.Conn, origin string, vk string) {
 	if v.Name() != origin {
 		log.Printf("Warning: verifier key name %q does not match origin %q.", v.Name(), origin)
 	}
-	err = sqlitex.Exec(db, "INSERT INTO key (origin, key) VALUES (?, ?)", nil, origin, vk)
+	err = sqlitexExec(db, "INSERT INTO key (origin, key) VALUES (?, ?)", nil, origin, vk)
 	if err != nil {
 		log.Fatalf("Error adding key: %v", err)
 	}
@@ -103,7 +103,7 @@ func addKey(db *sqlite.Conn, origin string, vk string) {
 }
 
 func delKey(db *sqlite.Conn, origin string, vk string) {
-	err := sqlitex.Exec(db, "DELETE FROM key WHERE origin = ? AND key = ?", nil, origin, vk)
+	err := sqlitexExec(db, "DELETE FROM key WHERE origin = ? AND key = ?", nil, origin, vk)
 	if err != nil {
 		log.Fatalf("Error deleting key: %v", err)
 	}
@@ -132,7 +132,7 @@ func addSigsumLog(db *sqlite.Conn, keyFlag string) {
 }
 
 func listLogs(db *sqlite.Conn) {
-	if err := sqlitex.Exec(db, `
+	if err := sqlitexExec(db, `
 	SELECT json_object(
 		'origin', log.origin,
 		'size', log.tree_size,
@@ -151,4 +151,8 @@ func listLogs(db *sqlite.Conn) {
 	}); err != nil {
 		log.Fatalf("Error listing logs: %v", err)
 	}
+}
+
+func sqlitexExec(conn *sqlite.Conn, query string, resultFn func(stmt *sqlite.Stmt) error, args ...any) error {
+	return sqlitex.Execute(conn, query, &sqlitex.ExecOptions{ResultFunc: resultFn, Args: args})
 }
