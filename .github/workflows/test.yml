@@ -23,8 +23,6 @@ jobs:
     steps:
       - name: Install hurl 4.1.0
         run: |
-          curl --location --remote-name https://github.com/Orange-OpenSource/hurl/releases/download/4.1.0/hurl_4.1.0_amd64.deb
-          sudo apt-get update && sudo apt-get install ./hurl_4.1.0_amd64.deb
       - uses: actions/checkout@v5
         with:
           persist-credentials: false
@@ -35,6 +33,10 @@ jobs:
       - uses: geomys/sandboxed-step@v1.1.1
         with:
           run: |
+            sudo apt-get update
+            sudo apt-get install -y openssh-client curl build-essential psmisc
+            curl --location --remote-name https://github.com/Orange-OpenSource/hurl/releases/download/4.1.0/hurl_4.1.0_amd64.deb
+            sudo apt-get install -y ./hurl_4.1.0_amd64.deb
             if [ "${{ matrix.deps }}" = "latest" ]; then
               go get -u && go mod tidy
             fi
