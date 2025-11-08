@@ -40,7 +40,7 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-	client, err := torchwood.NewClient(dirCache, torchwood.WithSumDBEntries())
+	client, err := torchwood.NewClient(dirCache, torchwood.WithCutEntry(torchwood.ReadSumDBEntry))
 	if err != nil {
 		panic(err)
 	}
