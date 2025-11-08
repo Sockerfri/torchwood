@@ -60,33 +60,44 @@ func WithTimeout(d time.Duration) ClientOption {
 	}
 }
 
-// WithCutEntry configures the function to split the next entry from a tile. The
-// default is to use the c2sp.org/tlog-tiles format.
+// WithCutEntry configures the function to split the next entry from a data tile
+// (a.k.a. entry bundle).
 //
 // The entry is surfaced by the Entries method, the record hash is used to check
 // inclusion in the tree, and the rest is passed to the next invocation of cut.
 //
 // The input tile is never empty. cut must not modify the tile.
+//
+// By default, the c2sp.org/tlog-tiles#log-entries format is used, as
+// implemented by [ReadTileEntry]. For the go.dev/design/25530-sumdb format, use
+// [ReadSumDBEntry]. For the c2sp.org/static-ct-api format, use
+// [filippo.io/sunlight.Client] instead.
 func WithCutEntry(cut func(tile []byte) (entry []byte, rh tlog.Hash, rest []byte, err error)) ClientOption {
 	return func(c *Client) {
 		c.cut = cut
 	}
 }
 
+// ReadSumDBEntry splits the next entry from a tile according to the
+// go.dev/design/25530-sumdb format, for use with [WithCutEntry].
+func ReadSumDBEntry(tile []byte) (entry []byte, rh tlog.Hash, rest []byte, err error) {
+	if idx := bytes.Index(tile, []byte("\n\n")); idx >= 0 {
+		// Add back one of the newlines.
+		entry, rest = tile[:idx+1], tile[idx+2:]
+	} else {
+		entry, rest = tile, nil
+	}
+	return entry, tlog.RecordHash(entry), rest, nil
+}
+
 // WithSumDBEntries configures the function to split the next entry from a tile
 // according to the go.dev/design/25530-sumdb format.
+//
+// Deprecated: use [WithCutEntry] with [ReadSumDBEntry] instead.
+//
+//go:fix inline
 func WithSumDBEntries() ClientOption {
-	return func(c *Client) {
-		c.cut = func(tile []byte) (entry []byte, rh tlog.Hash, rest []byte, err error) {
-			if idx := bytes.Index(tile, []byte("\n\n")); idx >= 0 {
-				// Add back one of the newlines.
-				entry, rest = tile[:idx+1], tile[idx+2:]
-			} else {
-				entry, rest = tile, nil
-			}
-			return entry, tlog.RecordHash(entry), rest, nil
-		}
-	}
+	return WithCutEntry(ReadSumDBEntry)
 }
 
 // Err returns the error encountered by the latest [Client.Entries] call.
