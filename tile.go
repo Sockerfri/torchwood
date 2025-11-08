@@ -76,9 +76,10 @@ func AppendTileEntry(tile []byte, entry []byte) ([]byte, error) {
 	return tile, nil
 }
 
-// TileReaderWithContext is an interface equivalent to [tlog.TileReader], but
-// with a context parameter for cancellation and a fixed [TileHeight].
-type TileReaderWithContext interface {
+// TileReader is an interface equivalent to [tlog.TileReader], but with a
+// context parameter for cancellation, a fixed [TileHeight], and a method to
+// fetch arbitrary additional endpoints, if available.
+type TileReader interface {
 	// ReadTiles returns the data for each requested tile.
 	// See [tlog.TileReader.ReadTiles] for details.
 	ReadTiles(ctx context.Context, tiles []tlog.Tile) (data [][]byte, err error)
@@ -86,21 +87,32 @@ type TileReaderWithContext interface {
 	// SaveTiles informs the TileReader that the tile data has been confirmed.
 	// See [tlog.TileReader.SaveTiles] for details.
 	SaveTiles(tiles []tlog.Tile, data [][]byte)
+
+	// ReadEndpoint fetches an arbitrary endpoint at the given path, such as
+	// "checkpoint", if supported.
+	ReadEndpoint(ctx context.Context, path string) (data []byte, err error)
 }
+
+// TileReaderWithContext is an obsolete name for [TileReader].
+//
+// Deprecated: use [TileReader] instead.
+//
+//go:fix inline
+type TileReaderWithContext = TileReader
 
 // TileHashReaderWithContext returns a HashReader that satisfies requests by
 // loading tiles of the given tree.
 //
 // It is equivalent to [tlog.TileHashReader], but passes the ctx argument to the
-// TileReaderWithContext methods.
-func TileHashReaderWithContext(ctx context.Context, tree tlog.Tree, tr TileReaderWithContext) tlog.HashReader {
+// [TileReader] methods.
+func TileHashReaderWithContext(ctx context.Context, tree tlog.Tree, tr TileReader) tlog.HashReader {
 	return tlog.HashReaderFunc(func(i []int64) ([]tlog.Hash, error) {
 		return tlog.TileHashReader(tree, tileReaderAndContext{tr: tr, ctx: ctx}).ReadHashes(i)
 	})
 }
 
 type tileReaderAndContext struct {
-	tr  TileReaderWithContext
+	tr  TileReader
 	ctx context.Context
 }
 

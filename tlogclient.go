@@ -23,16 +23,16 @@ import (
 // Client is a tlog client that fetches and authenticates tiles, and exposes log
 // entries as a Go iterator or by their index.
 type Client struct {
-	tr      TileReaderWithContext
+	tr      TileReader
 	cut     func([]byte) ([]byte, tlog.Hash, []byte, error)
 	timeout time.Duration
 	err     error
 }
 
 // NewClient creates a new [Client] that fetches tiles using the given
-// [TileReaderWithContext]. The TileReaderWithContext would typically be a [TileFetcher],
+// [TileReader]. The TileReader would typically be a [TileFetcher],
 // optionally wrapped in a [PermanentCache] to cache tiles on disk.
-func NewClient(tr TileReaderWithContext, opts ...ClientOption) (*Client, error) {
+func NewClient(tr TileReader, opts ...ClientOption) (*Client, error) {
 	c := &Client{tr: tr}
 	for _, opt := range opts {
 		opt(c)
@@ -224,11 +224,11 @@ type tileWithData struct {
 	data []byte
 }
 
-// edgeMemoryCache is a [TileReaderWithContext] that caches two edges in the tree: the
+// edgeMemoryCache is a [TileReader] that caches two edges in the tree: the
 // rightmost one that's used to compute the tree hash, and the one that moves
 // through the tree as we progress through entries.
 type edgeMemoryCache struct {
-	tr TileReaderWithContext
+	tr TileReader
 	t  map[int][2]tileWithData // map[level][2]tileWithData
 }
 
@@ -304,6 +304,10 @@ func tileLess(a, b tlog.Tile) bool {
 	return a.N < b.N || (a.N == b.N && a.W < b.W)
 }
 
+func (c *edgeMemoryCache) ReadEndpoint(ctx context.Context, path string) (data []byte, err error) {
+	return c.tr.ReadEndpoint(ctx, path)
+}
+
 // Entry returns a log entry by its index, and an inclusion proof in the tree.
 //
 // The provided tree should have been verified by the caller, for example by
@@ -344,7 +348,7 @@ func (c *Client) Entry(ctx context.Context, tree tlog.Tree, index int64) ([]byte
 	return entry, proof, nil
 }
 
-// TileFetcher is a [TileReaderWithContext] that fetches tiles from a remote server.
+// TileFetcher is a [TileReader] that fetches tiles from a remote server.
 type TileFetcher struct {
 	base     string
 	hc       *http.Client
@@ -434,7 +438,7 @@ func WithTilePath(tilePath func(tlog.Tile) string) TileFetcherOption {
 	}
 }
 
-// ReadTiles implements [TileReaderWithContext].
+// ReadTiles implements [TileReader].
 //
 // It retries 429 and 5xx responses, and network errors.
 func (f *TileFetcher) ReadTiles(ctx context.Context, tiles []tlog.Tile) (data [][]byte, err error) {
@@ -527,7 +531,7 @@ func parseRetryAfter(header string) time.Time {
 	return time.Time{}
 }
 
-// SaveTiles implements [TileReaderWithContext]. It does nothing.
+// SaveTiles implements [TileReader]. It does nothing.
 func (f *TileFetcher) SaveTiles(tiles []tlog.Tile, data [][]byte) {}
 
 type slogDiscardHandler struct{}
@@ -537,10 +541,10 @@ func (slogDiscardHandler) Handle(context.Context, slog.Record) error { return ni
 func (slogDiscardHandler) WithAttrs(attrs []slog.Attr) slog.Handler  { return slogDiscardHandler{} }
 func (slogDiscardHandler) WithGroup(name string) slog.Handler        { return slogDiscardHandler{} }
 
-// PermanentCache is a [TileReaderWithContext] that caches verified, non-partial tiles
-// in a filesystem directory.
+// PermanentCache is a [TileReader] that caches verified, non-partial tiles in a
+// filesystem directory. It passes through ReadEndpoint calls without caching.
 type PermanentCache struct {
-	tr       TileReaderWithContext
+	tr       TileReader
 	dir      string
 	log      *slog.Logger
 	tilePath func(tlog.Tile) string
@@ -548,7 +552,7 @@ type PermanentCache struct {
 
 // NewPermanentCache creates a new [PermanentCache] that caches tiles in the
 // given directory. The directory must exist.
-func NewPermanentCache(tr TileReaderWithContext, dir string, opts ...PermanentCacheOption) (*PermanentCache, error) {
+func NewPermanentCache(tr TileReader, dir string, opts ...PermanentCacheOption) (*PermanentCache, error) {
 	if fi, err := os.Stat(dir); err != nil || !fi.IsDir() {
 		return nil, fmt.Errorf("cache directory %q does not exist or is not a directory: %w", dir, err)
 	}
@@ -587,7 +591,7 @@ func WithPermanentCacheTilePath(tilePath func(tlog.Tile) string) PermanentCacheO
 	}
 }
 
-// ReadTiles implements [TileReaderWithContext].
+// ReadTiles implements [TileReader].
 func (c *PermanentCache) ReadTiles(ctx context.Context, tiles []tlog.Tile) (data [][]byte, err error) {
 	data = make([][]byte, len(tiles))
 	missing := make([]tlog.Tile, 0, len(tiles))
@@ -621,7 +625,7 @@ func (c *PermanentCache) ReadTiles(ctx context.Context, tiles []tlog.Tile) (data
 	return data, nil
 }
 
-// SaveTiles implements [TileReaderWithContext].
+// SaveTiles implements [TileReader].
 func (c *PermanentCache) SaveTiles(tiles []tlog.Tile, data [][]byte) {
 	for i, t := range tiles {
 		if t.H != TileHeight {
@@ -646,4 +650,9 @@ func (c *PermanentCache) SaveTiles(tiles []tlog.Tile, data [][]byte) {
 		}
 	}
 	c.tr.SaveTiles(tiles, data)
+}
+
+// ReadEndpoint passes through to the underlying TileReader.
+func (c *PermanentCache) ReadEndpoint(ctx context.Context, path string) (data []byte, err error) {
+	return c.tr.ReadEndpoint(ctx, path)
 }
