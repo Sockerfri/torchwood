@@ -1,8 +1,29 @@
-## v0.5.0
+## v0.6.0
+
+Switched to Go project LICENSE (BSD-3-Clause).
+
+Updated minimum Go version to Go 1.24.
 
 ### torchwood
 
 - Added tlog client, tiles fetcher, and permanent cache.
+
+- Added `HashProof` to prove inclusion of arbitrary tree interior nodes.
+
+- Added `ReadTileEntry` and `AppendTileEntry` to read and write entry bundles,
+  and `ReadSumDBEntry` to read Go sumdb entries.
+
+### litewitness
+
+- Switched to zombiezen.com/go/sqlite.
+
+### witnessctl
+
+- Added `pull-logs` command to fetch logs from the witness network.
+
+### prefix
+
+- New *experimental* prefix trie implementation. Unstable.
 
 ## v0.5.0
 
