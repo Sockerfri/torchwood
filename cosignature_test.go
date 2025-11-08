@@ -1,6 +1,7 @@
 package torchwood_test
 
 import (
+	"bytes"
 	"crypto/ed25519"
 	"crypto/rand"
 	"testing"
@@ -20,7 +21,7 @@ func TestSignerRoundtrip(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	msg := "test\n123\nf+7CoKgXKE/tNys9TTXcr/ad6U/K3xvznmzew9y6SP0=\n"
+	msg := "test\n123\nf+7CoKgXKE/tNys9TTXcr/ad6U/K3xvznmzew9y6SP0=\nextension 1\nextension 2\n"
 	n, err := note.Sign(&note.Note{Text: msg}, s)
 	if err != nil {
 		t.Fatal(err)
@@ -28,5 +29,10 @@ func TestSignerRoundtrip(t *testing.T) {
 
 	if _, err := note.Open(n, note.VerifierList(s.Verifier())); err != nil {
 		t.Fatal(err)
+	}
+
+	nn := bytes.Replace(n, []byte("extension 2"), []byte("extension X"), 1)
+	if _, err := note.Open(nn, note.VerifierList(s.Verifier())); err == nil {
+		t.Fatal("expected error verifying modified note, got nil")
 	}
 }

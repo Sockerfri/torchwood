@@ -1,3 +1,10 @@
+## v0.6.1
+
+### torchwood
+
+- Fix `CosignatureSigner`/`CosignatureVerifier` to correctly sign and verify
+  checkpoints with extension lines, according to c2sp.org/tlog-cosignature.
+
 ## v0.6.0
 
 Switched to Go project LICENSE (BSD-3-Clause).

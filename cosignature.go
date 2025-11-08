@@ -77,21 +77,18 @@ func formatCosignatureV1(t uint64, msg []byte) ([]byte, error) {
 	//
 	//      cosignature/v1
 	//      time TTTTTTTTTT
-	//      origin line
-	//      NNNNNNNNN
-	//      tree hash
+	//      [checkpoint]
 	//
-	// where TTTTTTTTTT is the current UNIX timestamp, and the following
-	// three lines are the first three lines of the note. All other
-	// lines are not processed by the witness, so are not signed.
+	// where TTTTTTTTTT is the current UNIX timestamp.
 
 	c, err := ParseCheckpoint(string(msg))
 	if err != nil {
 		return nil, fmt.Errorf("message being signed is not a valid checkpoint: %w", err)
 	}
-	return []byte(fmt.Sprintf(
-		"cosignature/v1\ntime %d\n%s\n%d\n%s\n",
-		t, c.Origin, c.N, base64.StdEncoding.EncodeToString(c.Hash[:]))), nil
+	if string(msg) != c.String() {
+		return nil, errors.New("message being signed does not match parsed checkpoint")
+	}
+	return []byte(fmt.Sprintf("cosignature/v1\ntime %d\n%s", t, msg)), nil
 }
 
 // CosignatureSigner is a [note.Signer] that produces timestamped
