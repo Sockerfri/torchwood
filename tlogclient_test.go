@@ -67,14 +67,15 @@ InZSsRXdXKTMF3W5wEcd9T6ro5zyOiRMGQsEPSTco6U=
 	}
 
 	tests := []struct {
-		start  int64
-		expect int
+		start     int64
+		expect    int
+		expectAll int
 	}{
-		{0, 1000},
-		{100000, 1000},
-		{31048497 - 1000, 1000 - 31048497%256},    // Stop before the partial.
-		{31048497 - 31048497%256, 31048497 % 256}, // Consume the partial.
-		{31048497, 0},
+		{0, 1000, 1000},
+		{100000, 1000, 1000},
+		{31048497 - 1000, 1000 - 31048497%256, 1000},              // Stop before the partial (without AllEntries).
+		{31048497 - 31048497%256, 31048497 % 256, 31048497 % 256}, // Consume the partial.
+		{31048497, 0, 0},
 	}
 
 	for _, tt := range tests {
@@ -103,6 +104,20 @@ InZSsRXdXKTMF3W5wEcd9T6ro5zyOiRMGQsEPSTco6U=
 				}
 				if count != tt.expect {
 					t.Errorf("got %d entries, want %d", count, tt.expect)
+				}
+
+				count = 0
+				for range client.AllEntries(t.Context(), tree, tt.start) {
+					count++
+					if count >= 1000 {
+						break
+					}
+				}
+				if err := client.Err(); err != nil {
+					t.Fatal(err)
+				}
+				if count != tt.expectAll {
+					t.Errorf("got %d entries with AllEntries, want %d", count, tt.expectAll)
 				}
 			})
 

@@ -115,7 +115,8 @@ func (c *Client) Err() error {
 // Iteration may stop before the size of the tree to avoid fetching a partial
 // data tile. Resuming with the same tree will yield the remaining entries,
 // however clients tailing a growing log are encouraged to fetch the next
-// checkpoint and use that as the tree argument.
+// checkpoint and use that as the tree argument. If this behavior is not
+// desired, use [Client.AllEntries] instead.
 //
 // Callers must check [Client.Err] after the iteration breaks.
 func (c *Client) Entries(ctx context.Context, tree tlog.Tree, start int64) iter.Seq2[int64, []byte] {
@@ -225,6 +226,29 @@ func (c *Client) Entries(ctx context.Context, tree tlog.Tree, start int64) iter.
 
 			if start == top {
 				return
+			}
+		}
+	}
+}
+
+// AllEntries works like [Client.Entries], but fetches all entries up to the
+// size of the tree, including those in partial data tiles.
+//
+// Callers that are tailing a growing log should instead use [Client.Entries],
+// and fetch a new tree every time iteration stops.
+func (c *Client) AllEntries(ctx context.Context, tree tlog.Tree, start int64) iter.Seq2[int64, []byte] {
+	return func(yield func(int64, []byte) bool) {
+		for i, entry := range c.Entries(ctx, tree, start) {
+			if !yield(i, entry) {
+				return
+			}
+			start = i + 1
+		}
+		if c.Err() == nil && start < tree.N && ctx.Err() == nil {
+			for i, entry := range c.Entries(ctx, tree, start) {
+				if !yield(i, entry) {
+					return
+				}
 			}
 		}
 	}
