@@ -13,6 +13,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"strconv"
 	"strings"
 	"time"
 	"unicode"
@@ -113,6 +114,48 @@ type CosignatureVerifier struct {
 }
 
 var _ note.Verifier = &CosignatureVerifier{}
+
+// NewCosignatureVerifier constructs a new [CosignatureVerifier] from a
+// c2sp.org/signed-note vkey string.
+func NewCosignatureVerifier(vkey string) (*CosignatureVerifier, error) {
+	name, vkey, _ := strings.Cut(vkey, "+")
+	hash16, key64, _ := strings.Cut(vkey, "+")
+	hash, err1 := strconv.ParseUint(hash16, 16, 32)
+	key, err2 := base64.StdEncoding.DecodeString(key64)
+	if len(hash16) != 8 || err1 != nil || err2 != nil || !isValidName(name) || len(key) == 0 {
+		return nil, errors.New("malformed verifier id")
+	}
+	if uint32(hash) != keyHash(name, key) {
+		return nil, errors.New("invalid verifier hash")
+	}
+	alg, key := key[0], key[1:]
+	if alg != algCosignatureV1 {
+		return nil, errors.New("unknown verifier algorithm")
+	}
+	if len(key) != ed25519.PublicKeySize {
+		return nil, errors.New("malformed verifier public key")
+	}
+	k := ed25519.PublicKey(key)
+	return &CosignatureVerifier{
+		verifier: verifier{
+			name: name,
+			hash: uint32(hash),
+			verify: func(msg, sig []byte) bool {
+				if len(sig) != 8+ed25519.SignatureSize {
+					return false
+				}
+				t := binary.BigEndian.Uint64(sig)
+				sig = sig[8:]
+				m, err := formatCosignatureV1(t, msg)
+				if err != nil {
+					return false
+				}
+				return ed25519.Verify(k, m, sig)
+			},
+		},
+		key: key,
+	}, nil
+}
 
 // String returns the vkey encoding of the verifier, according to
 // c2sp.org/signed-note.

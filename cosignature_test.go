@@ -35,4 +35,18 @@ func TestSignerRoundtrip(t *testing.T) {
 	if _, err := note.Open(nn, note.VerifierList(s.Verifier())); err == nil {
 		t.Fatal("expected error verifying modified note, got nil")
 	}
+
+	v, err := torchwood.NewCosignatureVerifier(s.Verifier().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v.Name() != "example.com" {
+		t.Fatalf("verifier name = %q; want %q", v.Name(), "example.com")
+	}
+	if v.KeyHash() != s.Verifier().KeyHash() {
+		t.Fatalf("verifier hash = %d; want %d", v.KeyHash(), s.Verifier().KeyHash())
+	}
+	if _, err := note.Open(n, note.VerifierList(v)); err != nil {
+		t.Fatal(err)
+	}
 }
