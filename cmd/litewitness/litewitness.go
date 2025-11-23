@@ -21,6 +21,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"slices"
 	"strings"
 	"syscall"
 	"time"
@@ -39,9 +40,63 @@ var nameFlag = flag.String("name", "", "URL-like (e.g. example.com/foo) name of 
 var dbFlag = flag.String("db", "litewitness.db", "path to sqlite database")
 var sshAgentFlag = flag.String("ssh-agent", "litewitness.sock", "path to ssh-agent socket")
 var listenFlag = flag.String("listen", "localhost:7380", "address to listen for HTTP requests")
+var noListenFlag = flag.Bool("no-listen", false, "do not open any listening socket, rely exclusively on bastions")
 var keyFlag = flag.String("key", "", "SSH fingerprint (with SHA256: prefix) of the witness key")
 var bastionFlag = flag.String("bastion", "", "address of the bastion(s) to reverse proxy through, comma separated, the first online one is selected")
 var testCertFlag = flag.Bool("testcert", false, "use rootCA.pem for connections to the bastion")
+
+type ConnectionSet struct {
+	connections map[string]func() // connection => cancel func
+	connect     func(context.Context, string)
+}
+
+func NewConnectionSet(connect func(context.Context, string)) *ConnectionSet {
+	return &ConnectionSet{
+		connections: make(map[string]func()),
+		connect:     connect,
+	}
+}
+
+func (s *ConnectionSet) Configure(ctx context.Context, addrs []string) {
+	slices.Sort(addrs)
+
+	// Disconnect addresses that have disappeared.
+	var toDelete []string
+	for addr, cancel := range s.connections {
+		if _, found := slices.BinarySearch(addrs, addr); !found {
+			cancel()
+			// Postpone delete, we can't delete while iterating over the map.
+			toDelete = append(toDelete, addr)
+		}
+	}
+	for _, addr := range toDelete {
+		delete(s.connections, addr)
+	}
+
+	// Connect new bastions.
+	for _, addr := range addrs {
+		if _, found := s.connections[addr]; found {
+			continue
+		}
+		// Quit early on cancel.
+		if ctx.Err() != nil {
+			break
+		}
+		connectionCtx, cancel := context.WithCancel(ctx)
+		s.connections[addr] = cancel
+		go s.connect(connectionCtx, addr)
+	}
+}
+
+func onSignal(signo os.Signal, callback func()) {
+	c := make(chan os.Signal, 1)
+	signal.Notify(c, signo)
+	go func() {
+		for range c {
+			callback()
+		}
+	}()
+}
 
 func main() {
 	flag.Parse()
@@ -52,18 +107,14 @@ func main() {
 	console.SetFilter(slogconsole.IPAddressFilter)
 	slog.SetDefault(slog.New(slogconsole.MultiHandler(h, console)))
 
-	c := make(chan os.Signal, 1)
-	signal.Notify(c, syscall.SIGUSR1)
-	go func() {
-		for range c {
-			slog.Info("received USR1 signal, toggling log level")
-			if level.Level() == slog.LevelDebug {
-				level.Set(slog.LevelInfo)
-			} else {
-				level.Set(slog.LevelDebug)
-			}
+	onSignal(syscall.SIGUSR1, func() {
+		slog.Info("received USR1 signal, toggling log level")
+		if level.Level() == slog.LevelDebug {
+			level.Set(slog.LevelInfo)
+		} else {
+			level.Set(slog.LevelDebug)
 		}
-	}()
+	})
 
 	signer := connectToSSHAgent()
 
@@ -89,10 +140,77 @@ func main() {
 		BaseContext:  func(net.Listener) context.Context { return ctx },
 	}
 	e := make(chan error, 1)
+
+	bastionSet := NewConnectionSet(func(ctx context.Context, addr string) {
+		var delays = []time.Duration{
+			100 * time.Millisecond,
+			1 * time.Second, 1 * time.Second, 1 * time.Second,
+			5 * time.Second, 15 * time.Second, 30 * time.Second,
+			1 * time.Minute,
+		}
+
+		// If a connection survives for resetRetryDelay, reset the retry delay.
+		const resetRetryDelay = 5 * time.Minute
+
+		retry := 0
+		for {
+			startTime := time.Now()
+			err := connectToBastion(ctx, addr, signer, srv, true)
+			duration := time.Since(startTime)
+			slog.Warn("bastion connection failed", "bastion", addr, "duration", duration, "err", err)
+
+			// Quit early on cancel.
+			if ctx.Err() != nil {
+				return
+			}
+
+			// If the connection lasted long enough, reset the retry delay.
+			if duration >= resetRetryDelay {
+				retry = 0
+			}
+
+			// Wait before retrying.
+			var delay time.Duration
+			if retry < len(delays) {
+				delay = delays[retry]
+			} else {
+				delay = delays[len(delays)-1]
+			}
+			slog.Info("waiting before reconnecting to bastion", "bastion", addr, "delay", delay)
+			timer := time.NewTimer(delay)
+			select {
+			case <-ctx.Done():
+				timer.Stop()
+				return
+			case <-timer.C:
+			}
+			retry++
+		}
+	})
+
+	// Handle log-specific bastions.
+	logBastions, err := w.AllBastions()
+	if err != nil {
+		fatal("failed looking up bastions", "err", err)
+	}
+	bastionSet.Configure(ctx, logBastions)
+
+	// At this point, ownership of bastionSet belongs with the signal goroutine,
+	// and must no longer be accessed by main goroutine.
+	onSignal(syscall.SIGHUP, func() {
+		slog.Info("received SIGHUP, reconfiguring bastions")
+		logBastions, err := w.AllBastions()
+		if err != nil {
+			slog.Warn("failed looking up bastions", "err", err)
+			return
+		}
+		bastionSet.Configure(ctx, logBastions)
+	})
+
 	if *bastionFlag != "" {
 		go func() {
 			for _, bastion := range strings.Split(*bastionFlag, ",") {
-				err := connectToBastion(ctx, bastion, signer, srv)
+				err := connectToBastion(ctx, bastion, signer, srv, false)
 				if err == errBastionDisconnected {
 					// Connection succeeded and then was interrupted. Restart to
 					// let the scheduler apply any backoff, and then retry all bastions.
@@ -102,11 +220,13 @@ func main() {
 			}
 			e <- errors.New("couldn't connect to any bastion")
 		}()
-	} else {
+	} else if !*noListenFlag {
 		go func() {
 			slog.Info("listening", "addr", *listenFlag)
 			e <- srv.ListenAndServe()
 		}()
+	} else if len(logBastions) == 0 {
+		slog.Warn("configured to not open a listening port, but no bastions configured")
 	}
 
 	select {
@@ -246,7 +366,7 @@ func indexHandler(w *witness.Witness) http.HandlerFunc {
 
 var errBastionDisconnected = errors.New("connection to bastion interrupted")
 
-func connectToBastion(ctx context.Context, bastion string, signer *signer, srv *http.Server) error {
+func connectToBastion(ctx context.Context, bastion string, signer *signer, srv *http.Server, logSpecific bool) error {
 	slog.Info("connecting to bastion", "bastion", bastion)
 	cert, err := selfSignedCertificate(signer)
 	if err != nil {
@@ -279,7 +399,19 @@ func connectToBastion(ctx context.Context, bastion string, signer *signer, srv *
 		slog.Info("connecting to bastion failed", "bastion", bastion, "err", err)
 		return fmt.Errorf("connecting to bastion: %v", err)
 	}
+	// Ensure that the connection is closed when our context is cancelled.
+	ctx, cancel = context.WithCancel(ctx)
+	defer cancel()
+	go func(ctx context.Context) {
+		// TODO: gracefully complete in-flight requests.
+		<-ctx.Done()
+		conn.Close()
+	}(ctx)
+
 	slog.Info("connected to bastion", "bastion", bastion)
+	if logSpecific {
+		ctx = witness.ContextWithBastion(ctx, bastion)
+	}
 	// TODO: find a way to surface the fatal error, especially since with
 	// TLS 1.3 it might be that the bastion rejected the client certificate.
 	(&http2.Server{
