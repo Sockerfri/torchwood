@@ -1,3 +1,25 @@
+## v0.7.0
+
+Updated golang.org/x/... dependencies.
+
+### torchwood
+
+- Added `NewCosignatureVerifier` to parse tlog-cosignature vkeys.
+
+- Added `Client.AllEntries` to fetch all entries from a log without stopping at
+  the last full tile boundary. This is useful for one-shot monitors that don't
+  tail the log.
+
+### litewitness
+
+- Added support for per-log bastions and `-no-listen` flag. Use the new
+  `add-bastion` and `del-bastion` witnessctl commands to manage them.
+
+### litebastion
+
+- Added `-listen-http` flag to accept requests on localhost instead of the
+  public port witnesses use to connect to the bastion.
+
 ## v0.6.1
 
 ### torchwood
