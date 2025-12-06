@@ -1,3 +1,13 @@
+## v0.8.0
+
+### torchwood
+
+- Added `TileFS`, a `TileReader` implementation that reads tiles from a
+  filesystem. Supports optional gzip decompression of data tiles.
+
+- Added `TileArchiveFS`, an `fs.FS` implementation that reads files from a
+  set of zip archives.
+
 ## v0.7.0
 
 Updated golang.org/x/... dependencies.
