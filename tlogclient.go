@@ -1,11 +1,14 @@
 package torchwood
 
 import (
+	"archive/zip"
 	"bytes"
+	"compress/gzip"
 	"context"
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"iter"
 	"log/slog"
 	"math"
@@ -690,4 +693,199 @@ func (c *PermanentCache) SaveTiles(tiles []tlog.Tile, data [][]byte) {
 // ReadEndpoint passes through to the underlying TileReader.
 func (c *PermanentCache) ReadEndpoint(ctx context.Context, path string) (data []byte, err error) {
 	return c.tr.ReadEndpoint(ctx, path)
+}
+
+// TileFS is a [TileReader] that reads tiles from a [fs.FS].
+type TileFS struct {
+	fs       fs.FS
+	tilePath func(tlog.Tile) string
+	gzip     bool
+}
+
+// NewTileFS creates a new [TileFS] that reads tiles from the given [fs.FS].
+// By default, it expects tiles to be laid out according to c2sp.org/tlog-tiles.
+func NewTileFS(f fs.FS, opts ...TileFSOption) (*TileFS, error) {
+	tf := &TileFS{fs: f}
+	for _, opt := range opts {
+		opt(tf)
+	}
+	if tf.tilePath == nil {
+		tf.tilePath = TilePath
+	}
+	return tf, nil
+}
+
+// TileFSOption is a function that configures a [TileFS].
+type TileFSOption func(*TileFS)
+
+// WithTileFSTilePath configures the function used to generate the tile path
+// from a [tlog.Tile]. By default, TileFS uses the c2sp.org/tlog-tiles scheme
+// implemented by [TilePath]. For the go.dev/design/25530-sumdb scheme, use
+// [tlog.Tile.Path]. For the c2sp.org/static-ct-api scheme, use
+// [filippo.io/sunlight.TilePath].
+func WithTileFSTilePath(tilePath func(tlog.Tile) string) TileFSOption {
+	return func(f *TileFS) {
+		f.tilePath = tilePath
+	}
+}
+
+// WithGzipDataTiles configures the TileFS to transparently decompress
+// gzip-compressed data tiles.
+func WithGzipDataTiles() TileFSOption {
+	return func(f *TileFS) {
+		f.gzip = true
+	}
+}
+
+// ReadTiles implements [TileReader].
+func (f *TileFS) ReadTiles(ctx context.Context, tiles []tlog.Tile) (data [][]byte, err error) {
+	data = make([][]byte, len(tiles))
+	for i, t := range tiles {
+		if t.H != TileHeight {
+			return nil, fmt.Errorf("unexpected tile height %d", t.H)
+		}
+		path := f.tilePath(t)
+		d, err := fs.ReadFile(f.fs, path)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read tile %s: %w", path, err)
+		}
+		if f.gzip && t.L == -1 {
+			gr, err := gzip.NewReader(bytes.NewReader(d))
+			if err != nil {
+				return nil, fmt.Errorf("failed to create gzip reader for tile %s: %w", path, err)
+			}
+			decompressed, err := io.ReadAll(gr)
+			if err != nil {
+				return nil, fmt.Errorf("failed to decompress tile %s: %w", path, err)
+			}
+			if err := gr.Close(); err != nil {
+				return nil, fmt.Errorf("failed to close gzip reader for tile %s: %w", path, err)
+			}
+			d = decompressed
+		}
+		data[i] = d
+	}
+	return data, nil
+}
+
+// ReadEndpoint fetches an arbitrary path.
+func (f *TileFS) ReadEndpoint(ctx context.Context, path string) (data []byte, err error) {
+	// Callers should use [os.Root] as a more robust protection, and FS
+	// implementations should check ValidPath, but avoid the most trivial
+	// directory traversal here as well.
+	if !fs.ValidPath(path) {
+		return nil, fmt.Errorf("invalid path %q", path)
+	}
+	return fs.ReadFile(f.fs, path)
+}
+
+// SaveTiles implements [TileReader]. It does nothing.
+func (f *TileFS) SaveTiles(tiles []tlog.Tile, data [][]byte) {}
+
+// TileArchiveFS is an [fs.FS] that reads tiles and accessory files from a
+// collection of zip files, numbered 000.zip, 001.zip, ...
+//
+// Each zip file contains the corresponding level 2 tile, and all the full tiles
+// below it. All other files (higher-level tiles, partial tiles on the right
+// edge, checkpoint, etc.) are expected to be present in every zip file.
+//
+// It supports both c2sp.org/tlog-tiles and c2sp.org/static-ct-api tile layouts,
+// but not go.dev/design/25530-sumdb.
+//
+// See also https://github.com/geomys/ct-archive/blob/main/README.md#archival-format.
+type TileArchiveFS struct {
+	zips fs.FS
+
+	// cachedReader, if not nil, is the cachedIndex-th zip file.
+	cachedReader *zip.Reader
+	cachedFile   fs.File
+	cachedIndex  int
+}
+
+// NewTileArchiveFS creates a new [TileArchiveFS] that reads zip files from
+// the root of the given [fs.FS]. f.Open must return files that implement
+// [io.ReaderAt].
+func NewTileArchiveFS(f fs.FS) *TileArchiveFS {
+	return &TileArchiveFS{zips: f}
+}
+
+// Open implements [fs.FS].
+func (tf *TileArchiveFS) Open(name string) (fs.File, error) {
+	var zipIndex int
+	t, ok := parseMultiTilePath(name)
+	switch {
+	case !ok || t.L > 2 || t.W != TileWidth:
+		// All zip files contain this file, so use the cached one, if any.
+		zipIndex = tf.cachedIndex
+	case t.L == 2:
+		zipIndex = int(t.N)
+	case t.L == 1:
+		zipIndex = int(t.N / TileWidth)
+	default: // levels 0 and -1
+		zipIndex = int(t.N / (TileWidth * TileWidth))
+	}
+	zr, err := tf.zipReader(zipIndex)
+	if err != nil {
+		return nil, &fs.PathError{Op: "open", Path: name, Err: err}
+	}
+	f, err := zr.Open(name)
+	if err != nil {
+		return nil, &fs.PathError{Op: "open", Path: name, Err: fmt.Errorf("reading from %03d.zip: %w", zipIndex, err)}
+	}
+	return f, nil
+}
+
+func parseMultiTilePath(path string) (tlog.Tile, bool) {
+	// Convert c2sp.org/static-ct-api to c2sp.org/tlog-tiles.
+	if rest, ok := strings.CutPrefix(path, "tile/data/"); ok {
+		path = "tile/entries/" + rest
+	}
+	tile, err := ParseTilePath(path)
+	if err != nil {
+		return tlog.Tile{}, false
+	}
+	return tile, true
+}
+
+func (tf *TileArchiveFS) zipReader(index int) (*zip.Reader, error) {
+	if tf.cachedReader != nil && tf.cachedIndex == index {
+		return tf.cachedReader, nil
+	}
+	if tf.cachedFile != nil {
+		if err := tf.cachedFile.Close(); err != nil {
+			return nil, fmt.Errorf("failed to close previous zip file: %w", err)
+		}
+	}
+	zipPath := fmt.Sprintf("%03d.zip", index)
+	f, err := tf.zips.Open(zipPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open zip file: %w", err)
+	}
+	at, ok := f.(io.ReaderAt)
+	if !ok {
+		return nil, &fs.PathError{Op: "open", Path: zipPath, Err: errors.New("zip file does not implement io.ReaderAt")}
+	}
+	fi, err := f.Stat()
+	if err != nil {
+		return nil, fmt.Errorf("failed to stat zip file %q: %w", zipPath, err)
+	}
+	zr, err := zip.NewReader(at, fi.Size())
+	if err != nil {
+		return nil, &fs.PathError{Op: "open", Path: zipPath, Err: fmt.Errorf("failed to read zip file: %w", err)}
+	}
+	tf.cachedReader = zr
+	tf.cachedFile = f
+	tf.cachedIndex = index
+	return zr, nil
+}
+
+func (tf *TileArchiveFS) Close() error {
+	if tf.cachedFile != nil {
+		err := tf.cachedFile.Close()
+		tf.cachedReader = nil
+		tf.cachedFile = nil
+		tf.cachedIndex = 0
+		return err
+	}
+	return nil
 }
