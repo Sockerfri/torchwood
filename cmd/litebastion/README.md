@@ -26,6 +26,8 @@ acceptable client/witness key hashes.
             path to TLS certificate
     -tls-key string
             path to TLS private key
+    -log-level string
+            minimum severity level to log (default "info")
 
 If you intend to protect backends from unwanted traffic and not forward
 arbitrary requests from the internet, you can accept request on localhost.
