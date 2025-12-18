@@ -22,6 +22,8 @@ acceptable client/witness key hashes.
             email address to register the ACME account with
     -host string
             host to obtain ACME certificate for
+    -log-level string
+            minimum severity level to log (default "info")
 
 If you intend to protect backends from unwanted traffic and not forward
 arbitrary requests from the internet, you can accept request on localhost.
