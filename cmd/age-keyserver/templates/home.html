@@ -15,7 +15,7 @@
 	<div class="section lookup-section">
 		<h2>Look up a public key</h2>
 		<form id="lookup-form">
-			<input type="email" id="lookup-email" name="email" required placeholder="joe@example.com" autofocus>
+			<input type="email" id="lookup-email" name="email" required placeholder="alice@example.com" autofocus>
 			<button type="submit">Look up key</button>
 		</form>
 		<div id="lookup-result"></div>
@@ -25,7 +25,7 @@
 		<h2>Use from the command line</h2>
 		<p>Encrypt a file to someone's public key directly:</p>
 		<div class="key-result">
-			<code class="pubkey-display">age -r $(go run filippo.io/torchwood/cmd/age-keylookup@main joe@example.com)</code>
+			<code class="pubkey-display">go install filippo.io/torchwood/cmd/age-keylookup@main<br>age -r $(age-keylookup alice@example.com)</code>
 			<button id="copy-cli-btn" onclick="copyCliExample()" class="copy-button">Copy</button>
 		</div>
 	</div>
@@ -51,7 +51,7 @@
 
 	<script>
 		function copyCliExample() {
-			const cliCommand = 'age -r $(go run filippo.io/torchwood/cmd/age-keylookup@main joe@example.com)';
+			const cliCommand = `go install filippo.io/torchwood/cmd/age-keylookup@main && age -r $(age-keylookup alice@example.com)`;
 			navigator.clipboard.writeText(cliCommand).then(() => {
 				const btn = document.getElementById('copy-cli-btn');
 				const originalText = btn.textContent;
