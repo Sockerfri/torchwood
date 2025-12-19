@@ -180,7 +180,10 @@ func keyHash(name string, key []byte) uint32 {
 }
 
 // CosignatureTimestamp returns the timestamp of the cosignature, which is the
-// time at which the witness signed the checkpoint.
+// time at which the witness signed the checkpoint, in seconds since the Unix epoch.
+//
+// Witnesses can re-sign a checkpoint, but only if it's for the latest tree they
+// have seen. Thus, the timestamp can be used to determine if a checkpoint is fresh.
 func CosignatureTimestamp(sig note.Signature) (int64, error) {
 	sigBytes, err := base64.StdEncoding.DecodeString(sig.Base64)
 	if err != nil {

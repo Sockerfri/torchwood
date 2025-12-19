@@ -129,7 +129,7 @@ func main() {
 	// remove integration latency for the first request. Keep a 1s checkpoint
 	// interval not to hit the witnesses too often; this will be observed only
 	// if two requests come in quick succession. Finally, only publish a
-	// checkpoint once a day if there are no new entries, making the average qps
+	// checkpoint every hour if there are no new entries, making the average qps
 	// on witnesses low. Poll for new checkpoints quickly since it should be
 	// just a read from a hot filesystem cache.
 	checkpointInterval := 1 * time.Second
@@ -140,7 +140,7 @@ func main() {
 		WithCheckpointSigner(s).
 		WithBatching(1, tessera.DefaultBatchMaxAge).
 		WithCheckpointInterval(checkpointInterval).
-		WithCheckpointRepublishInterval(24*time.Hour).
+		WithCheckpointRepublishInterval(1*time.Hour).
 		WithWitnesses(witnesses, nil))
 	if err != nil {
 		log.Fatalln("failed to create log appender:", err)

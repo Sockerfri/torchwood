@@ -243,9 +243,24 @@ func monitorLog(serverURL string, policy torchwood.Policy, vrfKey *vrf.PublicKey
 	if err != nil {
 		return nil, fmt.Errorf("failed to read checkpoint: %w", err)
 	}
-	checkpoint, _, err := torchwood.VerifyCheckpoint(signedCheckpoint, policy)
+	checkpoint, n, err := torchwood.VerifyCheckpoint(signedCheckpoint, policy)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse checkpoint: %w", err)
+	}
+
+	// Check the checkpoint is fresh
+	for _, sig := range n.Sigs {
+		if sig.Name == checkpoint.Origin {
+			// The log's signature doesn't include a timestamp, for legacy reasons.
+			continue
+		}
+		t, err := torchwood.CosignatureTimestamp(sig)
+		if err != nil {
+			return nil, fmt.Errorf("failed to extract cosignature %q timestamp: %w", sig.Name, err)
+		}
+		if time.Since(time.Unix(t, 0)) > 6*time.Hour {
+			return nil, fmt.Errorf("checkpoint cosignature %q is too old", sig.Name)
+		}
 	}
 
 	// Fetch all entries up to the checkpoint size
