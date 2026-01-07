@@ -6,7 +6,7 @@ exec witnessctl add-sigsum-log -key=ffdc2d4d98e4124d3feaf788c0c2f9abfd796083d1f0
 exec witnessctl add-bastion -origin=sigsum.org/v1/tree/4d6d8825a6bb689d459628312889dfbb0bcd41b5211d9e1ce768b0ff0309e562 -bastion=localhost:9443
 
 # start bastion
-exec litebastion -listen localhost:9443 -testcert -backends=backends.txt &litebastion&
+exec litebastion -listen localhost:9443 -tls-cert localhost.pem -tls-key localhost-key.pem -backends=backends.txt &litebastion&
 waitfor localhost:9443
 
 # start ssh-agent
@@ -24,7 +24,7 @@ waitfor https://localhost:9443/e933707e0e36c30f01d94b5d81e742da373679d88eb0f85f9
 exec hurl --cacert rootCA.pem --test add-checkpoint.hurl
 
 # start a second bastion on a different port
-exec litebastion -listen localhost:9444 -testcert -backends=backends.txt &litebastion2&
+exec litebastion -listen localhost:9444 -tls-cert localhost.pem -tls-key localhost-key.pem -backends=backends.txt &litebastion2&
 waitfor localhost:9444
 
 # add a second log and configure it to use the second bastion

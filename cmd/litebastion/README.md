@@ -22,6 +22,10 @@ acceptable client/witness key hashes.
             email address to register the ACME account with
     -host string
             host to obtain ACME certificate for
+    -tls-cert string
+            path to TLS certificate
+    -tls-key string
+            path to TLS private key
 
 If you intend to protect backends from unwanted traffic and not forward
 arbitrary requests from the internet, you can accept request on localhost.
@@ -36,6 +40,10 @@ certificate. Use the `-cache`, `-email`, and `-host` flags to configure the ACME
 client. The ALPN ACME challenge is used, so as long as the `-listen` port
 receives connections to the `-host` name at port 443, everything should just
 work.
+
+Alternatively, if both `-tls-cert` and `-tls-key` are set, ACME is disabled and
+the provided certificate and private key are used instead. The certificate and
+key are reloaded on SIGHUP.
 
 ## bastion as a library
 

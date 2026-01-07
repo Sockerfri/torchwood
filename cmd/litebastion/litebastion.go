@@ -24,6 +24,7 @@ import (
 	"os/signal"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -37,7 +38,8 @@ import (
 
 var listenAddr = flag.String("listen", "localhost:8443", "host and port to listen at")
 var listenHTTPPort = flag.String("listen-http", "", "localhost port to listen for HTTP requests")
-var testCertificates = flag.Bool("testcert", false, "use localhost.pem and localhost-key.pem instead of ACME")
+var tlsCertFile = flag.String("tls-cert", "", "path to TLS certificate; disables ACME")
+var tlsKeyFile = flag.String("tls-key", "", "path to TLS private key; disables ACME")
 var autocertCache = flag.String("cache", "", "directory to cache ACME certificates at")
 var autocertHost = flag.String("host", "", "host to obtain ACME certificate for")
 var autocertEmail = flag.String("email", "", "")
@@ -57,19 +59,26 @@ func main() {
 	http2.VerboseLogs = true // will go to DEBUG due to SetLogLoggerLevel
 	slog.SetLogLoggerLevel(slog.LevelDebug)
 
-	var getCertificate func(hello *tls.ClientHelloInfo) (*tls.Certificate, error)
-	if *testCertificates {
-		cert, err := tls.LoadX509KeyPair("localhost.pem", "localhost-key.pem")
-		if err != nil {
-			logFatal("can't load test certificates", "err", err)
+	var reloadCert func() error
+	var getCertificate func(*tls.ClientHelloInfo) (*tls.Certificate, error)
+	switch {
+	case *tlsKeyFile != "" && *tlsCertFile != "":
+		var cert atomic.Pointer[tls.Certificate]
+		reloadCert = func() error {
+			c, err := tls.LoadX509KeyPair(*tlsCertFile, *tlsKeyFile)
+			if err != nil {
+				return err
+			}
+			cert.Store(&c)
+			return nil
 		}
-		getCertificate = func(hello *tls.ClientHelloInfo) (*tls.Certificate, error) {
-			return &cert, nil
+		if err := reloadCert(); err != nil {
+			logFatal("can't load certificates", "err", err)
 		}
-	} else {
-		if *autocertCache == "" || *autocertHost == "" || *autocertEmail == "" {
-			logFatal("-cache, -host, and -email or -testcert are required")
+		getCertificate = func(_ *tls.ClientHelloInfo) (*tls.Certificate, error) {
+			return cert.Load(), nil
 		}
+	case *autocertCache != "" && *autocertHost != "" && *autocertEmail != "":
 		m := &autocert.Manager{
 			Cache:      autocert.DirCache(*autocertCache),
 			Prompt:     autocert.AcceptTOS,
@@ -77,6 +86,9 @@ func main() {
 			HostPolicy: autocert.HostWhitelist(*autocertHost),
 		}
 		getCertificate = m.GetCertificate
+		reloadCert = func() error { return nil }
+	default:
+		logFatal("-cache, -host, and -email or -tls-key and -tls-cert are required")
 	}
 
 	if *allowedBackendsFile == "" {
@@ -131,6 +143,9 @@ func main() {
 	signal.Notify(c, syscall.SIGHUP)
 	go func() {
 		for range c {
+			if err := reloadCert(); err != nil {
+				slog.Error("failed to reload certificate", "err", err)
+			}
 			if err := reloadBackends(); err != nil {
 				slog.Error("failed to reload backends", "err", err)
 			} else {

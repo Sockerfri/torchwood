@@ -4,7 +4,7 @@
 exec witnessctl add-sigsum-log -key=ffdc2d4d98e4124d3feaf788c0c2f9abfd796083d1f0495437f302ec79cf100f
 
 # start bastion
-exec litebastion -testcert -backends=backends.txt -listen localhost:8444 -listen-http 8080 &litebastion&
+exec litebastion -tls-cert localhost.pem -tls-key localhost-key.pem -backends=backends.txt -listen localhost:8444 -listen-http 8080 &litebastion&
 waitfor localhost:8444
 
 # start ssh-agent
