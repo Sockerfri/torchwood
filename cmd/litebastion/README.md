@@ -30,11 +30,11 @@ acceptable client/witness key hashes.
             minimum severity level to log (default "info")
 
 If you intend to protect backends from unwanted traffic and not forward
-arbitrary requests from the internet, you can accept request on localhost.
-This is for example useful when running a bastion for your own log.
+arbitrary requests from the internet, you can accept requests on a separate
+address. This is for example useful when running a bastion for your own log.
 
-    -listen-http PORT
-            only accept HTTP requests at http://127.0.0.1:PORT
+    -listen-http ADDRESS
+            host and port to listen on for HTTP requests
 
 Since litebastion needs to operate at a lower level than HTTPS on the witness
 side, it can't be behind a reverse proxy, and needs to configure its own TLS
