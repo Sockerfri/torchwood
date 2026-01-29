@@ -6,6 +6,10 @@
 
 - ACME now works correctly then using `-listen-http`.
 
+### witnessctl
+
+- `add-key` now rejects duplicate keys.
+
 ## v0.8.0
 
 ### torchwood
