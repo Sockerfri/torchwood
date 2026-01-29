@@ -23,19 +23,20 @@ acceptable client/witness key hashes.
     -host string
             host to obtain ACME certificate for
 
-If you intend to protect backends from unwanted traffic and not forward
-arbitrary requests from the internet, you can accept request on localhost.
-This is for example useful when running a bastion for your own log.
-
-    -listen-http PORT
-            only accept HTTP requests at http://127.0.0.1:PORT
-
 Since litebastion needs to operate at a lower level than HTTPS on the witness
 side, it can't be behind a reverse proxy, and needs to configure its own TLS
 certificate. Use the `-cache`, `-email`, and `-host` flags to configure the ACME
 client. The ALPN ACME challenge is used, so as long as the `-listen` port
 receives connections to the `-host` name at port 443, everything should just
 work.
+
+    -listen-http [HOST:]PORT
+            only accept HTTP requests at http://HOST:PORT or http://localhost:PORT
+
+If you intend to protect backends from unwanted traffic and not forward arbitrary
+requests from the internet, you can accept HTTP requests on a separate port.
+Backends will still be able to connect to the public -listen address.
+This is for example useful when running a bastion for your own log.
 
 ## bastion as a library
 

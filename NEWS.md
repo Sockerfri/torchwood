@@ -1,3 +1,9 @@
+## v0.8.1
+
+### litebastion
+
+- `-listen-http` now accepts `host:port` in addition to a bare port number.
+
 ## v0.8.0
 
 ### torchwood
