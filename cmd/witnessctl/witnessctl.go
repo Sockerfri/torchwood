@@ -139,7 +139,18 @@ func checkBastion(bastion string) {
 }
 
 func addKey(db *sqlite.Conn, origin string, vk string) {
-	err := sqlitexExec(db, "INSERT INTO key (origin, key) VALUES (?, ?)", nil, origin, vk)
+	var exists bool
+	err := sqlitexExec(db, "SELECT 1 FROM key WHERE origin = ? AND key = ?", func(stmt *sqlite.Stmt) error {
+		exists = true
+		return nil
+	}, origin, vk)
+	if err != nil {
+		log.Fatalf("Error checking key: %v", err)
+	}
+	if exists {
+		log.Fatalf("Key %q already exists for log %q.", vk, origin)
+	}
+	err = sqlitexExec(db, "INSERT INTO key (origin, key) VALUES (?, ?)", nil, origin, vk)
 	if err != nil {
 		log.Fatalf("Error adding key: %v", err)
 	}

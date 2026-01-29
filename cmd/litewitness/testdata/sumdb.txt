@@ -2,6 +2,10 @@
 exec witnessctl add-log -origin 'go.sum database tree'
 exec witnessctl add-key -origin 'go.sum database tree' -key sum.golang.org+033de0ae+Ac4zctda0e5eza+HJyk9SxEdh+s3Ux18htTTAD8OuAn8
 
+# adding the same key again should fail
+! exec witnessctl add-key -origin 'go.sum database tree' -key sum.golang.org+033de0ae+Ac4zctda0e5eza+HJyk9SxEdh+s3Ux18htTTAD8OuAn8
+stderr 'already exists'
+
 # start ssh-agent
 env SSH_AUTH_SOCK=$WORK/s # barely below the max path length
 ! exec ssh-agent -a $SSH_AUTH_SOCK -D & # ssh-agent always exits 2

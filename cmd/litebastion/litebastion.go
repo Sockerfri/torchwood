@@ -37,7 +37,7 @@ import (
 )
 
 var listenAddr = flag.String("listen", "localhost:8443", "host and port to listen at")
-var listenHTTPPort = flag.String("listen-http", "", "localhost port to listen for HTTP requests")
+var listenHTTP = flag.String("listen-http", "", "host:port or localhost port to listen for HTTP requests")
 var tlsCertFile = flag.String("tls-cert", "", "path to TLS certificate; disables ACME")
 var tlsKeyFile = flag.String("tls-key", "", "path to TLS private key; disables ACME")
 var autocertCache = flag.String("cache", "", "directory to cache ACME certificates at")
@@ -170,9 +170,12 @@ func main() {
 	defer stop()
 	serveGroup, ctx := errgroup.WithContext(ctx)
 
-	if *listenHTTPPort != "" {
+	if *listenHTTP != "" {
+		if _, _, err := net.SplitHostPort(*listenHTTP); err != nil {
+			*listenHTTP = net.JoinHostPort("localhost", *listenHTTP)
+		}
 		hs := &http.Server{
-			Addr:         net.JoinHostPort("localhost", *listenHTTPPort),
+			Addr:         *listenHTTP,
 			Handler:      http.MaxBytesHandler(mux, 10*1024),
 			ReadTimeout:  5 * time.Second,
 			WriteTimeout: 5 * time.Second,
