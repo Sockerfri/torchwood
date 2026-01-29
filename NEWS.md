@@ -4,6 +4,8 @@
 
 - `-listen-http` now accepts `host:port` in addition to a bare port number.
 
+- ACME now works correctly then using `-listen-http`.
+
 ## v0.8.0
 
 ### torchwood

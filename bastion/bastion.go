@@ -28,6 +28,7 @@ import (
 	"sync"
 	"time"
 
+	"golang.org/x/crypto/acme"
 	"golang.org/x/net/http2"
 )
 
@@ -89,7 +90,10 @@ func New(c *Config) (*Bastion, error) {
 	}
 	b.tls = &tls.Config{
 		MinVersion: tls.VersionTLS13,
-		NextProtos: []string{"bastion/0"},
+		// Including acme.ALPNProto lets the GetCertificate function handle
+		// ACME challenges, if supported. VerifyConnection will still reject
+		// connections that don't use the "bastion/0" ALPN protocol.
+		NextProtos: []string{"bastion/0", acme.ALPNProto},
 		ClientAuth: tls.RequireAnyClientCert,
 		VerifyConnection: func(cs tls.ConnectionState) error {
 			if cs.NegotiatedProtocol != "bastion/0" {
